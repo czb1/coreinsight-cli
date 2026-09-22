@@ -82,7 +82,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		failure(id, codeInternalError, "No Session Cookie", "后端返回登录成功，但响应中没有 Set-Cookie，无法建立本地会话")
 		return errHandled
 	}
-	sess := &Session{Cookie: cookie, Username: username, Server: rt.CoreInsightServer, SavedAt: time.Now().Format(time.RFC3339)}
+	sess := &Session{Cookie: cookie, Username: username, Server: rt.ChatServer, SavedAt: time.Now().Format(time.RFC3339)}
 	if !expires.IsZero() {
 		sess.ExpiresAt = expires.Format(time.RFC3339)
 	}
@@ -91,7 +91,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		return errHandled
 	}
 	rt.Session = sess
-	result := map[string]interface{}{"authenticated": true, "username": username, "server": rt.CoreInsightServer, "cookie": maskedCookie(cookie), "session_file": sessionFile(), "saved_at": sess.SavedAt, "expires_at": nullable(sess.ExpiresAt)}
+	result := map[string]interface{}{"authenticated": true, "username": username, "server": rt.ChatServer, "cookie": maskedCookie(cookie), "session_file": sessionFile(), "saved_at": sess.SavedAt, "expires_at": nullable(sess.ExpiresAt)}
 	if _, msg, ok := businessCode(payload); ok && msg != "" {
 		result["msg"] = msg
 	}
@@ -179,14 +179,14 @@ func errMissingPassword() error {
 }
 
 func doLoginRequest(rt *Runtime, body []byte) (*http.Response, interface{}, error) {
-	req, err := http.NewRequest(http.MethodPost, rt.CoreInsightServer+loginPath, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, rt.ChatServer+loginPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if rt.Debug {
-		fmt.Fprintf(os.Stderr, "[debug] POST %s%s\n", rt.CoreInsightServer, loginPath)
+		fmt.Fprintf(os.Stderr, "[debug] POST %s%s\n", rt.ChatServer, loginPath)
 	}
 	resp, err := rt.httpClient().Do(req)
 	if err != nil {
@@ -269,7 +269,7 @@ func runAuthStatus(rt *Runtime, args []string) error {
 		failure(id, codeUnauthenticated, "Session Expired", map[string]interface{}{"authenticated": false, "reason": reason, "username": rt.Session.Username, "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(), "hint": "会话已过期，请重新执行: coreinsight-cli auth login --username <域账号>"})
 		return errUnauthenticated
 	}
-	success(id, map[string]interface{}{"authenticated": true, "source": "session_file", "username": nullable(rt.Session.Username), "server": rt.CoreInsightServer, "cookie": maskedCookie(rt.Session.Cookie), "session_file": sessionFile(), "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "age_seconds": rt.Session.ageSeconds()})
+	success(id, map[string]interface{}{"authenticated": true, "source": "session_file", "username": nullable(rt.Session.Username), "server": rt.ChatServer, "cookie": maskedCookie(rt.Session.Cookie), "session_file": sessionFile(), "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "age_seconds": rt.Session.ageSeconds()})
 	return nil
 }
 func runAuthLogout(rt *Runtime) error {
