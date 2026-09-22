@@ -18,6 +18,8 @@ coreinsight-cli auth logout
 
 登录调用 `POST /api/auth/login`，成功后把 Cookie 保存到 `~/.coreinsight-cli/session.json`（0600），Core Insight 业务请求自动携带 Cookie。
 
+> 当前提供的 Core Insight / Skill / 经验接口材料没有给出登录接口定义，因此登录部分沿用参考仓 `czb1/cli` 的模式：`POST /api/auth/login`，请求体 `{userName, passwd}`，并从响应 `Set-Cookie` 建立本地会话。如果 Core Insight 实际认证入口不同，只需要替换这一处认证实现。
+
 ## 2. 知识问答 / 检索
 
 四个路由参数 `--kb_sns`、`--products`、`--departments`、`--scenes` 必须且只能选择一个；多个值用逗号分隔。`user_id` 默认取登录用户名，也可以显式传 `--user_id`。
@@ -59,7 +61,9 @@ coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
 coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
 ```
 
-`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再按产品查询场景。`offering_cn_name` 原样作为产品名使用，不做 trim。
+`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再按产品查询场景。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
+
+`skill search` 将 `dimType` 固定为 `产品级`。Core Insight Skill 返回多个版本时，现有调用方契约要求按 `versions[].uploadDate` 判断最新版本，而不是数组顺序或版本字符串大小。
 
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 
@@ -93,6 +97,10 @@ coreinsight-cli experience upload \
   --version_name "v1.2" \
   --feature "向量混合检索"
 ```
+
+## 5. OKF 知识中心
+
+当前材料只给出了“知识配置”标题，没有提供对应 Endpoint、Method、请求体或响应契约，因此本版本没有臆造 OKF 命令。补充 API 契约后可以按相同模式继续扩展。
 
 ## 环境变量
 
