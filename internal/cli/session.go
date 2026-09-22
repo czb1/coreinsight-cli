@@ -26,7 +26,6 @@ func sessionDir() (string, error) {
 	}
 	return filepath.Join(home, ".coreinsight-cli"), nil
 }
-
 func sessionFile() string {
 	d, err := sessionDir()
 	if err != nil {
@@ -34,7 +33,6 @@ func sessionFile() string {
 	}
 	return filepath.Join(d, sessionFileName)
 }
-
 func saveSession(s *Session) error {
 	d, err := sessionDir()
 	if err != nil {
@@ -52,7 +50,6 @@ func saveSession(s *Session) error {
 	}
 	return os.WriteFile(filepath.Join(d, sessionFileName), raw, 0o600)
 }
-
 func loadSession() (*Session, error) {
 	p := sessionFile()
 	raw, err := os.ReadFile(p)
@@ -66,17 +63,11 @@ func loadSession() (*Session, error) {
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, fmt.Errorf("会话文件损坏: %w", err)
 	}
-	if s.Cookie == "" && s.Username == "" {
+	if s.Cookie == "" {
 		return nil, nil
-	}
-	if s.ExpiresAt != "" {
-		if t, err := time.Parse(time.RFC3339, s.ExpiresAt); err == nil && time.Now().After(t) {
-			return nil, nil
-		}
 	}
 	return &s, nil
 }
-
 func clearSession() (bool, error) {
 	p := sessionFile()
 	if err := os.Remove(p); err != nil {
@@ -87,7 +78,32 @@ func clearSession() (bool, error) {
 	}
 	return true, nil
 }
-
+func (s *Session) expired() (bool, string) {
+	if s == nil {
+		return true, "no_session"
+	}
+	if s.ExpiresAt == "" {
+		return false, ""
+	}
+	t, err := time.Parse(time.RFC3339, s.ExpiresAt)
+	if err != nil {
+		return false, ""
+	}
+	if time.Now().After(t) {
+		return true, "cookie_expired"
+	}
+	return false, ""
+}
+func (s *Session) ageSeconds() int64 {
+	if s == nil {
+		return -1
+	}
+	t, err := time.Parse(time.RFC3339, s.SavedAt)
+	if err != nil {
+		return -1
+	}
+	return int64(time.Since(t).Seconds())
+}
 func maskedCookie(cookie string) string {
 	var parts []string
 	for _, part := range strings.Split(cookie, ";") {

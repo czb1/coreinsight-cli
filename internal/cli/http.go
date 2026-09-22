@@ -61,10 +61,22 @@ func (rt *Runtime) userID(override string) (string, error) {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override), nil
 	}
-	if rt.Session != nil && strings.TrimSpace(rt.Session.Username) != "" {
-		return strings.TrimSpace(rt.Session.Username), nil
+	if rt.Session != nil {
+		if expired, _ := rt.Session.expired(); !expired && strings.TrimSpace(rt.Session.Username) != "" {
+			return strings.TrimSpace(rt.Session.Username), nil
+		}
 	}
 	return "", fmt.Errorf("缺少用户 ID：请先执行 coreinsight-cli auth login，或使用 --user_id 指定")
+}
+
+func (rt *Runtime) addSessionCookie(req *http.Request) {
+	if rt.Session == nil || rt.Session.Cookie == "" {
+		return
+	}
+	if expired, _ := rt.Session.expired(); expired {
+		return
+	}
+	req.Header.Set("Cookie", rt.Session.Cookie)
 }
 
 func (rt *Runtime) doJSON(method, fullURL string, body interface{}, withSession bool) (*http.Response, interface{}, error) {
@@ -87,8 +99,8 @@ func (rt *Runtime) doJSON(method, fullURL string, body interface{}, withSession 
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if withSession && rt.Session != nil && rt.Session.Cookie != "" {
-		req.Header.Set("Cookie", rt.Session.Cookie)
+	if withSession {
+		rt.addSessionCookie(req)
 	}
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", req.Method, fullURL)
@@ -140,8 +152,8 @@ func (rt *Runtime) doMultipart(fullURL string, query url.Values, fileField, file
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
-	if withSession && rt.Session != nil && rt.Session.Cookie != "" {
-		req.Header.Set("Cookie", rt.Session.Cookie)
+	if withSession {
+		rt.addSessionCookie(req)
 	}
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] POST %s (multipart file=%s)\n", fullURL, filePath)

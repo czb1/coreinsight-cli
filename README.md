@@ -10,15 +10,35 @@ go build -o coreinsight-cli ./cmd/coreinsight-cli
 
 ## 1. 登录
 
+认证功能直接复用/移植 `czb1/cli` 的认证实现模式（`auth.go`、`session.go`、`prompt_*.go`），仅适配 CLI 名称、环境变量前缀和本地会话目录。
+
 ```bash
+# 与原命令兼容
 coreinsight-cli auth login --username U --password P
+
+# 脚本 / CI 推荐：密码不进入命令历史
+printf '%s\n' "$PASS" | coreinsight-cli auth login --username U --password-stdin
+
+# 也可只执行登录，在交互终端输入用户名和密码；密码尽可能不回显
+coreinsight-cli auth login
+
+# 查看本地认证状态
 coreinsight-cli auth status
+
+# 清除本地会话
 coreinsight-cli auth logout
 ```
 
-登录调用 `POST /api/auth/login`，成功后把 Cookie 保存到 `~/.coreinsight-cli/session.json`（0600），Core Insight 业务请求自动携带 Cookie。
+登录凭证解析规则与参考 CLI 保持一致：
 
-> 当前提供的 Core Insight / Skill / 经验接口材料没有给出登录接口定义，因此登录部分沿用参考仓 `czb1/cli` 的模式：`POST /api/auth/login`，请求体 `{userName, passwd}`，并从响应 `Set-Cookie` 建立本地会话。如果 Core Insight 实际认证入口不同，只需要替换这一处认证实现。
+1. 如果传入 `--body-file` 或 `--body`，直接使用原始 JSON 请求体（兼容旧调用）。
+2. 用户名按 `--username/-u` → `COREINSIGHT_AUTH_USERNAME` → 交互输入解析。
+3. 密码按 `--password-stdin` → `--password/-p` → `COREINSIGHT_AUTH_PASSWORD` → 交互式无回显输入解析。
+4. 登录请求本身不携带历史 Cookie，避免旧会话干扰。
+5. 成功后从响应 `Set-Cookie` 提取 Cookie 和过期时间，保存到 `~/.coreinsight-cli/session.json`（目录 0700、文件 0600）；后续业务请求自动携带未过期 Cookie。
+6. `auth status` 的退出码为：`0` 已认证，`3` 未认证或本地会话已过期。
+
+> 当前提供的 Core Insight / Skill / 经验接口材料没有给出登录接口定义，因此登录 Endpoint 仍沿用参考仓 `czb1/cli`：`POST /api/auth/login`，请求体 `{userName, passwd}`，并从响应 `Set-Cookie` 建立本地会话。如果 Core Insight 实际认证入口不同，只需要替换这一处认证 Endpoint。
 
 ## 2. 知识问答 / 检索
 
