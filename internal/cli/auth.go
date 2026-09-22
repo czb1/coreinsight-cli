@@ -82,7 +82,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		failure(id, codeInternalError, "No Session Cookie", "后端返回登录成功，但响应中没有 Set-Cookie，无法建立本地会话")
 		return errHandled
 	}
-	sess := &Session{Cookie: cookie, Username: username, Server: rt.CoreInsightServer, SavedAt: time.Now().Format(time.RFC3339)}
+	sess := &Session{Cookie: cookie, Username: username, Server: rt.AuthServer, SavedAt: time.Now().Format(time.RFC3339)}
 	if !expires.IsZero() {
 		sess.ExpiresAt = expires.Format(time.RFC3339)
 	}
@@ -91,7 +91,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		return errHandled
 	}
 	rt.Session = sess
-	result := map[string]interface{}{"authenticated": true, "username": username, "server": rt.CoreInsightServer, "cookie": maskedCookie(cookie), "session_file": sessionFile(), "saved_at": sess.SavedAt, "expires_at": nullable(sess.ExpiresAt)}
+	result := map[string]interface{}{"authenticated": true, "username": username, "server": rt.AuthServer, "cookie": maskedCookie(cookie), "session_file": sessionFile(), "saved_at": sess.SavedAt, "expires_at": nullable(sess.ExpiresAt)}
 	if _, msg, ok := businessCode(payload); ok && msg != "" {
 		result["msg"] = msg
 	}
@@ -119,10 +119,10 @@ func buildLoginBody(o *loginOpts) ([]byte, string, error) {
 		name, _ := m["userName"].(string)
 		return []byte(raw), name, nil
 	}
-	username := firstNonEmpty(o.username, os.Getenv("COREINSIGHT_AUTH_USERNAME"))
+	username := firstNonEmpty(o.username, os.Getenv("COREINSIGHT_AUTH_USERNAME"), os.Getenv("OMRES_AUTH_USERNAME"))
 	if username == "" {
 		if !stdinIsTerminal() {
-			return nil, "", fmt.Errorf("缺少用户名：请使用 --username，或设置环境变量 COREINSIGHT_AUTH_USERNAME")
+			return nil, "", fmt.Errorf("缺少用户名：请使用 --username，或设置环境变量 COREINSIGHT_AUTH_USERNAME / OMRES_AUTH_USERNAME")
 		}
 		v, err := promptLine("域账号用户名: ")
 		if err != nil {
@@ -162,7 +162,7 @@ func resolvePassword(o *loginOpts) (string, error) {
 		}
 		return strings.TrimRight(string(data), "\r\n"), nil
 	}
-	if p := firstNonEmpty(o.password, os.Getenv("COREINSIGHT_AUTH_PASSWORD")); p != "" {
+	if p := firstNonEmpty(o.password, os.Getenv("COREINSIGHT_AUTH_PASSWORD"), os.Getenv("OMRES_AUTH_PASSWORD")); p != "" {
 		return p, nil
 	}
 	if !stdinIsTerminal() {
@@ -175,18 +175,18 @@ func resolvePassword(o *loginOpts) (string, error) {
 	return pw, nil
 }
 func errMissingPassword() error {
-	return fmt.Errorf("缺少密码：请使用 --password-stdin 从标准输入传入，或设置环境变量 COREINSIGHT_AUTH_PASSWORD，或在交互式终端中直接运行 coreinsight-cli auth login")
+	return fmt.Errorf("缺少密码：请使用 --password-stdin 从标准输入传入，或设置环境变量 COREINSIGHT_AUTH_PASSWORD / OMRES_AUTH_PASSWORD，或在交互式终端中直接运行 coreinsight-cli auth login")
 }
 
 func doLoginRequest(rt *Runtime, body []byte) (*http.Response, interface{}, error) {
-	req, err := http.NewRequest(http.MethodPost, rt.CoreInsightServer+loginPath, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, rt.AuthServer+loginPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if rt.Debug {
-		fmt.Fprintf(os.Stderr, "[debug] POST %s%s\n", rt.CoreInsightServer, loginPath)
+		fmt.Fprintf(os.Stderr, "[debug] POST %s%s\n", rt.AuthServer, loginPath)
 	}
 	resp, err := rt.httpClient().Do(req)
 	if err != nil {
@@ -269,7 +269,7 @@ func runAuthStatus(rt *Runtime, args []string) error {
 		failure(id, codeUnauthenticated, "Session Expired", map[string]interface{}{"authenticated": false, "reason": reason, "username": rt.Session.Username, "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(), "hint": "会话已过期，请重新执行: coreinsight-cli auth login --username <域账号>"})
 		return errUnauthenticated
 	}
-	success(id, map[string]interface{}{"authenticated": true, "source": "session_file", "username": nullable(rt.Session.Username), "server": rt.CoreInsightServer, "cookie": maskedCookie(rt.Session.Cookie), "session_file": sessionFile(), "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "age_seconds": rt.Session.ageSeconds()})
+	success(id, map[string]interface{}{"authenticated": true, "source": "session_file", "username": nullable(rt.Session.Username), "server": rt.AuthServer, "cookie": maskedCookie(rt.Session.Cookie), "session_file": sessionFile(), "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "age_seconds": rt.Session.ageSeconds()})
 	return nil
 }
 func runAuthLogout(rt *Runtime) error {
@@ -293,8 +293,12 @@ func authLoginHelp() {
 
 凭证解析:
   1. --body-file / --body（原始 JSON，兼容参考 CLI）
-  2. --username/-u；未指定时读取 COREINSIGHT_AUTH_USERNAME；交互终端最后提示输入
-  3. --password-stdin 优先；否则 --password/-p、COREINSIGHT_AUTH_PASSWORD、交互式无回显输入
+  2. --username/-u；未指定时读取 COREINSIGHT_AUTH_USERNAME / OMRES_AUTH_USERNAME；交互终端最后提示输入
+  3. --password-stdin 优先；否则 --password/-p、COREINSIGHT_AUTH_PASSWORD / OMRES_AUTH_PASSWORD、交互式无回显输入
+
+登录接口与 czb1/cli 保持一致:
+  POST https://omtool.rnd.huawei.com/api/auth/login
+  可使用 --server 或 --auth-server 覆盖登录 server。
 `)
 }
 func authStatusHelp() {

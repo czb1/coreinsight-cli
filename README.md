@@ -38,7 +38,7 @@ coreinsight-cli auth logout
 5. 成功后从响应 `Set-Cookie` 提取 Cookie 和过期时间，保存到 `~/.coreinsight-cli/session.json`（目录 0700、文件 0600）；后续业务请求自动携带未过期 Cookie。
 6. `auth status` 的退出码为：`0` 已认证，`3` 未认证或本地会话已过期。
 
-> 当前提供的 Core Insight / Skill / 经验接口材料没有给出登录接口定义，因此登录 Endpoint 仍沿用参考仓 `czb1/cli`：`POST /api/auth/login`，请求体 `{userName, passwd}`，并从响应 `Set-Cookie` 建立本地会话。如果 Core Insight 实际认证入口不同，只需要替换这一处认证 Endpoint。
+> `auth login` 与 `czb1/cli` 保持一致：默认请求 `POST https://omtool.rnd.huawei.com/api/auth/login`，请求体为 `{userName, passwd}`，登录请求不携带历史 Cookie；HTTP 2xx 且业务 `code=0` 后，从响应 `Set-Cookie` 提取 Cookie/过期时间并建立本地会话。可用 `COREINSIGHT_AUTH_SERVER` 或 `--auth-server` 覆盖；为兼容参考 CLI，显式 `--server` 也会覆盖登录 server。
 
 ## 2. 知识问答 / 检索
 
@@ -85,9 +85,9 @@ coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
 coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
 ```
 
-`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再按产品查询场景。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
+`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
 
-`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill search-smart` 保留为兼容别名。原产品/场景接口迁移到 `skill scene-search`，其中 `dimType` 固定为 `产品级`。
+`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill search-smart` 保留为兼容别名。原产品/场景接口迁移到 `skill scene-search`，通过 Chat 服务调用 `POST /experience/harness/scene/skills`，默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scene/skills`，其中 `dimType` 固定为 `产品级`。
 
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 
@@ -126,11 +126,12 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
+- `COREINSIGHT_AUTH_SERVER`
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`
 - `COREINSIGHT_TIMEOUT`
-- `COREINSIGHT_AUTH_USERNAME`
-- `COREINSIGHT_AUTH_PASSWORD`
+- `COREINSIGHT_AUTH_USERNAME`（同时兼容 `OMRES_AUTH_USERNAME`）
+- `COREINSIGHT_AUTH_PASSWORD`（同时兼容 `OMRES_AUTH_PASSWORD`）
 
 同名全局参数可覆盖服务地址和超时，例如：
 

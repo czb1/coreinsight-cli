@@ -16,9 +16,12 @@ import (
 	"time"
 )
 
+const defaultAuthServer = "https://omtool.rnd.huawei.com"
+
 type Runtime struct {
 	CoreInsightServer string
 	ChatServer        string
+	AuthServer        string
 	AICommunityServer string
 	CoreHarnessServer string
 	Timeout           time.Duration
@@ -43,6 +46,7 @@ func defaultRuntime() (*Runtime, error) {
 	return &Runtime{
 		CoreInsightServer: strings.TrimRight(core, "/"),
 		ChatServer:        strings.TrimRight(envOr("COREINSIGHT_CHAT_SERVER", core+"/chat"), "/"),
+		AuthServer:        strings.TrimRight(envOr("COREINSIGHT_AUTH_SERVER", defaultAuthServer), "/"),
 		AICommunityServer: strings.TrimRight(envOr("COREINSIGHT_AI_COMMUNITY_SERVER", "https://aicommunity.coreai.rnd.huawei.com"), "/"),
 		CoreHarnessServer: strings.TrimRight(envOr("COREINSIGHT_CORE_HARNESS_SERVER", "http://coreharness.spec.rnd.huawei.com"), "/"),
 		Timeout:           timeout,
