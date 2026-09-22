@@ -38,7 +38,7 @@ coreinsight-cli auth logout
 5. 成功后从响应 `Set-Cookie` 提取 Cookie 和过期时间，保存到 `~/.coreinsight-cli/session.json`（目录 0700、文件 0600）；后续业务请求自动携带未过期 Cookie。
 6. `auth status` 的退出码为：`0` 已认证，`3` 未认证或本地会话已过期。
 
-> `auth login` 使用 Chat 服务基址，默认请求 `POST https://coreinsight.rnd.huawei.com/chat/api/auth/login`，请求体为 `{userName, passwd}`，并从响应 `Set-Cookie` 建立本地会话。可用 `COREINSIGHT_CHAT_SERVER` 或 `--chat-server` 覆盖基址。
+> `auth login` 与 `czb1/cli` 保持一致：默认请求 `POST https://omtool.rnd.huawei.com/api/auth/login`，请求体为 `{userName, passwd}`，登录请求不携带历史 Cookie；HTTP 2xx 且业务 `code=0` 后，从响应 `Set-Cookie` 提取 Cookie/过期时间并建立本地会话。可用 `COREINSIGHT_AUTH_SERVER` 或 `--auth-server` 覆盖；为兼容参考 CLI，显式 `--server` 也会覆盖登录 server。
 
 ## 2. 知识问答 / 检索
 
@@ -126,11 +126,12 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
+- `COREINSIGHT_AUTH_SERVER`
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`
 - `COREINSIGHT_TIMEOUT`
-- `COREINSIGHT_AUTH_USERNAME`
-- `COREINSIGHT_AUTH_PASSWORD`
+- `COREINSIGHT_AUTH_USERNAME`（同时兼容 `OMRES_AUTH_USERNAME`）
+- `COREINSIGHT_AUTH_PASSWORD`（同时兼容 `OMRES_AUTH_PASSWORD`）
 
 同名全局参数可覆盖服务地址和超时，例如：
 
