@@ -62,14 +62,13 @@ func TestLoginRequestMatchesReferenceFlow(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 	var gotBody map[string]string
+	var decodeErr error
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotCookie = r.Header.Get("Cookie")
 		gotMethod = r.Method
 		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
+		decodeErr = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Add("Set-Cookie", "JSESSIONID=abc123; Path=/")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
@@ -88,6 +87,9 @@ func TestLoginRequestMatchesReferenceFlow(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if decodeErr != nil {
+		t.Fatalf("decode body: %v", decodeErr)
 	}
 	if code, _, ok := businessCode(payload); !ok || code != 0 {
 		t.Fatalf("unexpected payload: %#v", payload)
