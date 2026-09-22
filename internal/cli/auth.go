@@ -188,7 +188,7 @@ func doLoginRequest(rt *Runtime, body []byte) (*http.Response, interface{}, erro
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] POST %s%s\n", rt.CoreInsightServer, loginPath)
 	}
-	resp, err := (&http.Client{Timeout: rt.Timeout}).Do(req)
+	resp, err := rt.httpClient().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
