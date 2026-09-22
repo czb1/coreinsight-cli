@@ -118,7 +118,11 @@ coreinsight-cli experience upload \
 
 当前材料只给出了“知识配置”标题，没有提供对应 Endpoint、Method、请求体或响应契约，因此本版本没有臆造 OKF 命令。补充 API 契约后可以按相同模式继续扩展。
 
-经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`show_personal`、`page`、`page_size`、`source`、`title`、`scene`。其中 `title` 取 `--query`，`user_id` 默认使用登录用户名，`caller_id` 默认与 `user_id` 相同。\n\n所有 HTTP/HTTPS 请求均使用统一客户端，并按当前内部环境要求关闭 TLS 证书校验。\n\n## 环境变量
+经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`show_personal`、`page`、`page_size`、`source`、`title`、`scene`。其中 `title` 取 `--query`，`user_id` 默认使用登录用户名，`caller_id` 默认与 `user_id` 相同。
+
+所有 HTTP/HTTPS 请求均使用统一客户端，并按当前内部环境要求关闭 TLS 证书校验。
+
+## 环境变量
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
