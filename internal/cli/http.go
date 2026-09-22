@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +58,20 @@ func envOr(k, def string) string {
 	return def
 }
 
+func (rt *Runtime) httpClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	}
+	// Internal CoreInsight/AI Community endpoints may use certificates that are not
+	// trusted by the local machine. Per CLI requirements, disable TLS verification
+	// for every outbound HTTPS request made by this client.
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	return &http.Client{Timeout: rt.Timeout, Transport: transport}
+}
+
 func (rt *Runtime) userID(override string) (string, error) {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override), nil
@@ -105,7 +120,7 @@ func (rt *Runtime) doJSON(method, fullURL string, body interface{}, withSession 
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", req.Method, fullURL)
 	}
-	resp, err := (&http.Client{Timeout: rt.Timeout}).Do(req)
+	resp, err := rt.httpClient().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -158,7 +173,7 @@ func (rt *Runtime) doMultipart(fullURL string, query url.Values, fileField, file
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] POST %s (multipart file=%s)\n", fullURL, filePath)
 	}
-	resp, err := (&http.Client{Timeout: rt.Timeout}).Do(req)
+	resp, err := rt.httpClient().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}

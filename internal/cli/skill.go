@@ -18,10 +18,10 @@ func runSkill(rt *Runtime, args []string) error {
 	switch args[0] {
 	case "scenes":
 		return runSkillScenes(rt, args[1:])
-	case "search":
-		return runSkillSearch(rt, args[1:])
-	case "search-smart":
+	case "search", "search-smart":
 		return runSkillSmart(rt, args[1:])
+	case "scene-search":
+		return runSkillSceneSearch(rt, args[1:])
 	case "download":
 		return runSkillDownload(rt, args[1:])
 	case "upload":
@@ -91,8 +91,8 @@ func runSkillScenes(rt *Runtime, args []string) error {
 	return nil
 }
 
-func runSkillSearch(rt *Runtime, args []string) error {
-	fs := newFS("skill search")
+func runSkillSceneSearch(rt *Runtime, args []string) error {
+	fs := newFS("skill scene-search")
 	var product, first, second string
 	fs.StringVar(&product, "product", "", "产品名称")
 	fs.StringVar(&first, "first_scene", "", "一级场景")
@@ -118,12 +118,12 @@ func runSkillSearch(rt *Runtime, args []string) error {
 }
 
 func runSkillSmart(rt *Runtime, args []string) error {
-	fs := newFS("skill search-smart")
+	fs := newFS("skill search")
 	var query, sortBy, sortOrder string
 	var page, pageSize int
 	fs.StringVar(&query, "query", "", "检索关键字")
 	fs.IntVar(&page, "page", 1, "页码")
-	fs.IntVar(&pageSize, "page_size", 10, "每页数量")
+	fs.IntVar(&pageSize, "page_size", 6, "每页数量")
 	fs.StringVar(&sortBy, "sort_by", "downloads", "排序字段")
 	fs.StringVar(&sortOrder, "sort_order", "desc", "排序方向")
 	if err := fs.Parse(args); err != nil {
@@ -192,7 +192,7 @@ func runSkillDownload(rt *Runtime, args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := (&http.Client{Timeout: rt.Timeout}).Do(req)
+	r, err := rt.httpClient().Do(req)
 	if err != nil {
 		return emitReqErr(err)
 	}
@@ -277,8 +277,9 @@ func runSkillUpload(rt *Runtime, args []string, parse bool) error {
 func skillHelp() {
 	plainHelp(`用法:
   coreinsight-cli skill scenes --repo .
-  coreinsight-cli skill search --product <产品> --first_scene <一级场景> --second_scene <二级场景>
-  coreinsight-cli skill search-smart --query <关键字> [--page 1] [--page_size 10] [--sort_by downloads] [--sort_order desc]
+  coreinsight-cli skill search --query <关键字> [--page 1] [--page_size 6] [--sort_by downloads] [--sort_order desc]
+  coreinsight-cli skill search-smart --query <关键字> [兼容别名]
+  coreinsight-cli skill scene-search --product <产品> --first_scene <一级场景> --second_scene <二级场景>
   coreinsight-cli skill download --skill_id <id> [--version <version>] [--output ./skills]
   coreinsight-cli skill upload --file <skill.zip> [--business_dimension <维度>]
   coreinsight-cli skill parse --file <skill.zip> [--business_dimension <维度>]
