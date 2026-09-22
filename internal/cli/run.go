@@ -92,6 +92,9 @@ func parseGlobals(rt *Runtime, args []string) ([]string, error) {
 				return nil, e
 			}
 			rt.CoreInsightServer = strings.TrimRight(v, "/")
+			// Keep auth --server override semantics compatible with czb1/cli:
+			// auth login uses the same explicitly supplied server when --server is set.
+			rt.AuthServer = strings.TrimRight(v, "/")
 			serverChanged = true
 		case "--chat-server":
 			v, e := take()
@@ -100,6 +103,12 @@ func parseGlobals(rt *Runtime, args []string) ([]string, error) {
 			}
 			rt.ChatServer = strings.TrimRight(v, "/")
 			chatChanged = true
+		case "--auth-server":
+			v, e := take()
+			if e != nil {
+				return nil, e
+			}
+			rt.AuthServer = strings.TrimRight(v, "/")
 		case "--ai-community-server":
 			v, e := take()
 			if e != nil {
@@ -170,8 +179,9 @@ func rootHelp() {
   version                    版本信息
 
 全局参数:
-  --server <url>              Core Insight 地址（默认 https://coreinsight.rnd.huawei.com）
+  --server <url>              Core Insight 地址；对 auth 也作为登录 server 覆盖
   --chat-server <url>         问答地址（默认 <server>/chat）
+  --auth-server <url>         登录地址（默认 https://omtool.rnd.huawei.com）
   --ai-community-server <url> AI Community 地址
   --core-harness-server <url> Core Harness 地址
   --timeout <seconds>         请求超时
