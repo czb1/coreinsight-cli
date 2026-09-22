@@ -70,7 +70,10 @@ coreinsight-cli skill search \
 # 兼容旧命令名，与 skill search 行为一致
 coreinsight-cli skill search-smart --query "数据库"
 
-# 原产品/场景检索保留为独立命令
+# 场景搜索也使用 AI Community 智能检索
+coreinsight-cli skill scene-search --query "333"
+
+# 兼容旧参数，按产品、一级场景、二级场景顺序用空格拼接为 keyword
 coreinsight-cli skill scene-search \
   --product "UNC USMF" \
   --first_scene "需求开发" \
@@ -87,7 +90,7 @@ coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
 
 `skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
 
-`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill search-smart` 保留为兼容别名。原产品/场景接口迁移到 `skill scene-search`，通过 Chat 服务调用 `POST /experience/harness/scene/skills`，默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scene/skills`，其中 `dimType` 固定为 `产品级`。
+`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill search-smart` 保留为兼容别名。`skill scene-search` 使用相同的 GET 接口和分页、排序默认值。支持 `--query`；未提供非空 `--query` 时，将 `--product`、`--first_scene`、`--second_scene` 的非空值按顺序用空格拼接为 `keyword`（智能关键词搜索，不是结构化场景过滤）。默认完整 URL 为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。
 
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 
