@@ -61,16 +61,20 @@ coreinsight-cli retrieve \
 coreinsight-cli skill scenes --repo .
 
 coreinsight-cli skill search \
+  --query "数据库" \
+  --page 1 \
+  --page_size 6 \
+  --sort_by downloads \
+  --sort_order desc
+
+# 兼容旧命令名，与 skill search 行为一致
+coreinsight-cli skill search-smart --query "数据库"
+
+# 原产品/场景检索保留为独立命令
+coreinsight-cli skill scene-search \
   --product "UNC USMF" \
   --first_scene "需求开发" \
   --second_scene "MML开发"
-
-coreinsight-cli skill search-smart \
-  --query "数据库" \
-  --page 1 \
-  --page_size 10 \
-  --sort_by downloads \
-  --sort_order desc
 
 coreinsight-cli skill download \
   --skill_id "bca61fb0-3734-49c0-906e-0209d17032fd" \
@@ -83,7 +87,7 @@ coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
 
 `skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再按产品查询场景。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
 
-`skill search` 将 `dimType` 固定为 `产品级`。Core Insight Skill 返回多个版本时，现有调用方契约要求按 `versions[].uploadDate` 判断最新版本，而不是数组顺序或版本字符串大小。
+`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill search-smart` 保留为兼容别名。原产品/场景接口迁移到 `skill scene-search`，其中 `dimType` 固定为 `产品级`。
 
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 
@@ -92,17 +96,9 @@ coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
 ```bash
 coreinsight-cli experience search \
   --query "智能客服系统" \
-  --search_field experience \
-  --caller_id w00123456 \
-  --scene "test" \
-  --scene_id "scene-001,scene-002" \
-  --top_k 10 \
   --page 1 \
-  --page_size 10 \
-  --vector_weight 0.7 \
-  --bm25_weight 0.3 \
-  --score_threshold 0.5 \
-  --quality_only
+  --page_size 5 \
+  --scene ALL
 
 coreinsight-cli experience upload \
   --scene "test" \
@@ -122,7 +118,7 @@ coreinsight-cli experience upload \
 
 当前材料只给出了“知识配置”标题，没有提供对应 Endpoint、Method、请求体或响应契约，因此本版本没有臆造 OKF 命令。补充 API 契约后可以按相同模式继续扩展。
 
-## 环境变量
+经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`show_personal`、`page`、`page_size`、`source`、`title`、`scene`。其中 `title` 取 `--query`，`user_id` 默认使用登录用户名，`caller_id` 默认与 `user_id` 相同。\n\n所有 HTTP/HTTPS 请求均使用统一客户端，并按当前内部环境要求关闭 TLS 证书校验。\n\n## 环境变量
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
