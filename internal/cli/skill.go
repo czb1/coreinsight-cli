@@ -76,7 +76,7 @@ func runSkillScenes(rt *Runtime, args []string) error {
 	for _, offering := range offerings {
 		code := scalarString(offering["offering_id"])
 		name, _ := offering["offering_cn_name"].(string)
-		resp, payload, err := rt.doJSON("POST", rt.CoreInsightServer+"/experience/harness/scenes", map[string]interface{}{"dimCode": code}, true)
+		resp, payload, err := rt.doJSON("POST", rt.ChatServer+"/experience/harness/scenes", map[string]interface{}{"dimCode": code}, true)
 		if err != nil {
 			return emitReqErr(err)
 		}
@@ -106,7 +106,7 @@ func runSkillSceneSearch(rt *Runtime, args []string) error {
 		}
 	}
 	body := map[string]interface{}{"firstScene": first, "secondScene": second, "dimType": "产品级", "dimName": product}
-	resp, payload, err := rt.doJSON("POST", rt.CoreInsightServer+"/experience/harness/scene/skills", body, true)
+	resp, payload, err := rt.doJSON("POST", rt.ChatServer+"/experience/harness/scene/skills", body, true)
 	if err != nil {
 		return emitReqErr(err)
 	}
