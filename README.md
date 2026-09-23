@@ -38,6 +38,12 @@ coreinsight-cli auth logout
 5. 成功后从响应 `Set-Cookie` 提取 Cookie 和过期时间，保存到 `~/.coreinsight-cli/session.json`（目录 0700、文件 0600）；后续业务请求自动携带未过期 Cookie。
 6. `auth status` 的退出码为：`0` 已认证，`3` 未认证或本地会话已过期。
 
+登录用户名即用户工号，登录后会保存并供后续命令复用，无需重复传工号：
+
+- `qa`、`retrieve`、`experience upload` 的 `user_id`，以及 `skill download/upload/parse` 的 `userId`，默认取登录工号。
+- 同时包含 `user_id` 和 `caller_id` 的经验检索，仅 `caller_id` 默认取登录工号；`user_id` 未指定时传空字符串，需要指定目标用户时使用 `--user_id`。
+- 显式传入的 `--user_id` / `--caller_id` 优先；没有有效登录会话时，需要显式提供对应的工号参数。
+
 > `auth login` 与 `czb1/cli` 保持一致：默认请求 `POST https://omtool.rnd.huawei.com/api/auth/login`，请求体为 `{userName, passwd}`，登录请求不携带历史 Cookie；HTTP 2xx 且业务 `code=0` 后，从响应 `Set-Cookie` 提取 Cookie/过期时间并建立本地会话。可用 `COREINSIGHT_AUTH_SERVER` 或 `--auth-server` 覆盖；为兼容参考 CLI，显式 `--server` 也会覆盖登录 server。
 
 ## 2. 知识问答 / 检索
@@ -122,7 +128,7 @@ coreinsight-cli experience upload \
 
 当前材料只给出了“知识配置”标题，没有提供对应 Endpoint、Method、请求体或响应契约，因此本版本没有臆造 OKF 命令。补充 API 契约后可以按相同模式继续扩展。
 
-经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`show_personal`、`page`、`page_size`、`source`、`title`、`scene`。其中 `title` 取 `--query`，`user_id` 默认使用登录用户名，`caller_id` 默认与 `user_id` 相同。
+经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`show_personal`、`page`、`page_size`、`source`、`title`、`scene`。其中 `title` 取 `--query`，`caller_id` 默认使用登录工号，`user_id` 仅使用显式传入的值，未指定时为空字符串。指定目标 `--user_id` 不会改变默认调用方工号。
 
 所有 HTTP/HTTPS 请求均使用统一客户端，并按当前内部环境要求关闭 TLS 证书校验。
 

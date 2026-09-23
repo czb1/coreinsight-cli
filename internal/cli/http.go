@@ -77,6 +77,10 @@ func (rt *Runtime) httpClient() *http.Client {
 }
 
 func (rt *Runtime) userID(override string) (string, error) {
+	return rt.identityID(override, "user_id")
+}
+
+func (rt *Runtime) identityID(override, flagName string) (string, error) {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override), nil
 	}
@@ -85,7 +89,7 @@ func (rt *Runtime) userID(override string) (string, error) {
 			return strings.TrimSpace(rt.Session.Username), nil
 		}
 	}
-	return "", fmt.Errorf("缺少用户 ID：请先执行 coreinsight-cli auth login，或使用 --user_id 指定")
+	return "", fmt.Errorf("缺少用户工号：请先执行 coreinsight-cli auth login，或使用 --%s 指定", flagName)
 }
 
 func (rt *Runtime) addSessionCookie(req *http.Request) {
