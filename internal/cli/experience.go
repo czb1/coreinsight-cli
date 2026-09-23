@@ -134,7 +134,7 @@ func runExperienceUpload(rt *Runtime, args []string) error {
 	if len(product) > 0 {
 		body["product"] = product
 	}
-	resp, payload, err := rt.doJSON("POST", rt.CoreInsightServer+"/memory/experience/doc", body, true)
+	resp, payload, err := rt.doJSON("POST", rt.memoryEndpoint(), body, true)
 	if err != nil {
 		return emitReqErr(err)
 	}

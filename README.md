@@ -129,6 +129,7 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
+- `COREINSIGHT_MEMORY_SERVER`（经验上传服务基址；默认使用 `COREINSIGHT_SERVER`）
 - `COREINSIGHT_AUTH_SERVER`
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`
@@ -141,3 +142,24 @@ coreinsight-cli experience upload \
 ```bash
 coreinsight-cli --server https://example.internal --timeout 300 qa ...
 ```
+
+## 405 / 问答超时排查
+
+经验上传使用文档定义的 `POST /memory/experience/doc`；不因 405 自动改为 PUT，也不自动重试写入（覆盖会产生新版本）。若 Memory 服务通过独立域名或网关前缀暴露，使用 `--memory-server` 或 `COREINSIGHT_MEMORY_SERVER` 指定**基址**。CLI 会追加 `/memory/experience/doc`，因此基址不要重复包含该接口路径。该设置只影响经验上传，经验搜索仍使用现有 Chat 接口。
+
+```bash
+# 下面地址是占位示例，必须替换成后端确认的真实服务基址
+coreinsight-cli --memory-server https://memory.example.internal/gateway experience upload \
+  --scene test --scene_id scene-001 --title 标题 --summary 摘要 --experience 内容
+
+coreinsight-cli --chat-server https://chat.example.internal/chat --debug qa \
+  --query "问题" --kb_sns 123
+```
+
+- `--chat-server` 指向 Chat 基址（默认 `<COREINSIGHT_SERVER>/chat`），CLI 会追加 `/app/support/app/chat` 或 `/app/support/app/retrieve`。环境变量末尾的斜杠会先移除，避免生成 `//chat`。
+- JSON 业务请求遇到会把 POST 改为 GET 的 301/302/303 时，直接报告重定向及目标地址；同方法的 307/308 仍可跟随。登录请求保持参考 CLI 的行为。
+- 405 错误包含实际请求方法、URL 和后端返回的 `Allow`（若存在）。应结合网关路由检查，不能仅凭 405 判定为“接口限制”。
+- 网络错误区分 DNS、连接失败和一般超时，并保留底层错误。一般超时不能直接证明服务器不可达，也可能是后端等待过久。核对内网/VPN、DNS、代理及 `NO_PROXY`，确认地址正确后再考虑 `--timeout`。
+- `--debug` 会输出业务请求体，请对分享的日志脱敏。
+
+回归测试使用本地 HTTP 服务检查上传、三个问题中的问答/检索请求及重定向行为。它们不验证华为内网服务是否可达，也不验证部署侧网关映射。

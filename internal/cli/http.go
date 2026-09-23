@@ -20,6 +20,7 @@ const defaultAuthServer = "https://omtool.rnd.huawei.com"
 
 type Runtime struct {
 	CoreInsightServer string
+	MemoryServer      string
 	ChatServer        string
 	AuthServer        string
 	AICommunityServer string
@@ -42,9 +43,10 @@ func defaultRuntime() (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	core := envOr("COREINSIGHT_SERVER", "https://coreinsight.rnd.huawei.com")
+	core := strings.TrimRight(envOr("COREINSIGHT_SERVER", "https://coreinsight.rnd.huawei.com"), "/")
 	return &Runtime{
-		CoreInsightServer: strings.TrimRight(core, "/"),
+		CoreInsightServer: core,
+		MemoryServer:      strings.TrimRight(envOr("COREINSIGHT_MEMORY_SERVER", ""), "/"),
 		ChatServer:        strings.TrimRight(envOr("COREINSIGHT_CHAT_SERVER", core+"/chat"), "/"),
 		AuthServer:        strings.TrimRight(envOr("COREINSIGHT_AUTH_SERVER", defaultAuthServer), "/"),
 		AICommunityServer: strings.TrimRight(envOr("COREINSIGHT_AI_COMMUNITY_SERVER", "https://aicommunity.coreai.rnd.huawei.com"), "/"),
@@ -124,14 +126,18 @@ func (rt *Runtime) doJSON(method, fullURL string, body interface{}, withSession 
 	if rt.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", req.Method, fullURL)
 	}
-	resp, err := rt.httpClient().Do(req)
+	// A 301/302/303 must not silently turn an API POST into a GET.
+	// Keep the login client's reference behavior unchanged.
+	client := rt.httpClient()
+	client.CheckRedirect = apiRedirectPolicy
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, requestError(req, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return resp, nil, err
+		return resp, nil, requestError(req, err)
 	}
 	var payload interface{}
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -198,7 +204,7 @@ func backendOK(resp *http.Response, payload interface{}) error {
 		return fmt.Errorf("无 HTTP 响应")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %s", resp.Status)
+		return httpStatusError(resp)
 	}
 	if m, ok := payload.(map[string]interface{}); ok {
 		if success, exists := m["success"].(bool); exists && !success {
