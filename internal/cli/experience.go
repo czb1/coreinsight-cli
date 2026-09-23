@@ -27,10 +27,10 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 	var page, pageSize int
 	var showPersonal bool
 	fs.StringVar(&query, "query", "", "查询文本，作为 title 搜索")
-	fs.StringVar(&caller, "caller_id", "", "调用方工号，默认与 user_id 相同")
+	fs.StringVar(&caller, "caller_id", "", "调用方工号，默认使用登录工号")
 	fs.StringVar(&scene, "scene", "ALL", "场景名称")
 	fs.StringVar(&source, "source", "web", "请求来源")
-	fs.StringVar(&userID, "user_id", "", "用户 ID，默认使用登录用户名")
+	fs.StringVar(&userID, "user_id", "", "目标用户 ID，默认空，不使用登录工号")
 	fs.IntVar(&page, "page", 1, "页码")
 	fs.IntVar(&pageSize, "page_size", 5, "每页数量")
 	fs.BoolVar(&showPersonal, "show_personal", false, "是否展示个人经验")
@@ -43,13 +43,9 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 	if page <= 0 || pageSize <= 0 {
 		return fmt.Errorf("--page / --page_size 必须为正整数")
 	}
-	uid, err := rt.userID(userID)
+	caller, err := rt.identityID(caller, "caller_id")
 	if err != nil {
 		return err
-	}
-	caller = strings.TrimSpace(caller)
-	if caller == "" {
-		caller = uid
 	}
 	scene = strings.TrimSpace(scene)
 	if scene == "" {
@@ -60,7 +56,7 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 		source = "web"
 	}
 	body := map[string]interface{}{
-		"user_id":       uid,
+		"user_id":       strings.TrimSpace(userID),
 		"caller_id":     caller,
 		"show_personal": showPersonal,
 		"page":          page,
@@ -165,6 +161,9 @@ func experienceHelp() {
 	plainHelp(`用法:
   coreinsight-cli experience search --query <文本> [--user_id <工号>] [--caller_id <工号>] [--scene ALL] [--page 1] [--page_size 5]
   coreinsight-cli experience upload --scene <场景> --scene_id <id> --title <标题> --summary <摘要> --experience <内容> [产品字段]
+
+检索仅 caller_id 默认使用登录工号；user_id 未指定时传空字符串。
+上传的 user_id 默认使用登录工号。显式 ID 参数优先。
 `)
 }
 
