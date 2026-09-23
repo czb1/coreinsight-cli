@@ -40,7 +40,7 @@ coreinsight-cli auth logout
 
 登录用户名即用户工号，登录后会保存并供后续命令复用，无需重复传工号：
 
-- `qa`、`retrieve`、`experience upload` 的 `user_id`，以及 `skill download/upload/parse` 的 `userId`，默认取登录工号。
+- `qa`、`retrieve`、`experience upload` 的 `user_id`，以及 `skill download/upload/verify` 的 `userId`，默认取登录工号。
 - 同时包含 `user_id` 和 `caller_id` 的经验检索，仅 `caller_id` 默认取登录工号；`user_id` 未指定时传空字符串，需要指定目标用户时使用 `--user_id`。
 - 显式传入的 `--user_id` / `--caller_id` 优先；没有有效登录会话时，需要显式提供对应的工号参数。
 
@@ -91,7 +91,7 @@ coreinsight-cli skill download \
   --output ./skills
 
 coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
-coreinsight-cli skill parse  --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 ```
 
 `skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。

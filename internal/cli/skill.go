@@ -26,7 +26,7 @@ func runSkill(rt *Runtime, args []string) error {
 		return runSkillDownload(rt, args[1:])
 	case "upload":
 		return runSkillUpload(rt, args[1:], false)
-	case "parse":
+	case "verify":
 		return runSkillUpload(rt, args[1:], true)
 	default:
 		return fmt.Errorf("未知 skill 子命令: %s", args[0])
@@ -291,6 +291,6 @@ func skillHelp() {
   coreinsight-cli skill scene-search --product <产品> --first_scene <一级场景> --second_scene <二级场景>
   coreinsight-cli skill download --skill_id <id> [--version <version>] [--output ./skills]
   coreinsight-cli skill upload --file <skill.zip> [--business_dimension <维度>]
-  coreinsight-cli skill parse --file <skill.zip> [--business_dimension <维度>]
+  coreinsight-cli skill verify --file <skill.zip> [--business_dimension <维度>]
 `)
 }
