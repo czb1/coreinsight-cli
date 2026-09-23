@@ -6,16 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 )
-
-func (rt *Runtime) memoryEndpoint() string {
-	base := rt.MemoryServer
-	if base == "" {
-		base = rt.CoreInsightServer
-	}
-	return strings.TrimRight(base, "/") + "/memory/experience/doc"
-}
 
 // Do not retry writes or guess another endpoint after a failed request.
 func apiRedirectPolicy(req *http.Request, via []*http.Request) error {

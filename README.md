@@ -109,12 +109,13 @@ coreinsight-cli experience upload \
   --title "在U2020上执行MML命令" \
   --summary "完整字段示例，包含向量化文本与元数据" \
   --experience "在该场景下积累的经验点" \
-  --rag_search_text "MML命令 U2020 执行" \
-  --product_line_name "云产品线A" \
-  --pdu_name "PDU-01" \
-  --product_id "PID-123" \
-  --version_name "v1.2" \
-  --feature "向量混合检索"
+  --rag_search_text "MML命令 U2020 执行"
+```
+
+经验上传的核心请求字段为 `user_id`、`title`、`summary`、`scene_id`、`scene`、`experience`、`rag_search_text`。`user_id` 默认取登录用户名，也可使用 `--user_id` 指定，不写死工号。成功响应中的 `data` 为经验 ID 字符串，CLI 会原样保留在 JSON-RPC 的 `result` 中，不要求版本信息对象。旧的 `--doc_id` 和产品字段参数保留透传兼容；新接口是否支持这些扩展字段、是否有覆盖语义，需以后端契约为准。
+
+```json
+{"code":200,"msg":"success","data":"3659f967-a733-4045-9b09-c3ba2ad8d9a1"}
 ```
 
 ## 5. OKF 知识中心
@@ -129,7 +130,6 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
-- `COREINSIGHT_MEMORY_SERVER`（经验上传服务基址；默认使用 `COREINSIGHT_SERVER`）
 - `COREINSIGHT_AUTH_SERVER`
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`
@@ -145,11 +145,11 @@ coreinsight-cli --server https://example.internal --timeout 300 qa ...
 
 ## 405 / 问答超时排查
 
-经验上传使用文档定义的 `POST /memory/experience/doc`；不因 405 自动改为 PUT，也不自动重试写入（覆盖会产生新版本）。若 Memory 服务通过独立域名或网关前缀暴露，使用 `--memory-server` 或 `COREINSIGHT_MEMORY_SERVER` 指定**基址**。CLI 会追加 `/memory/experience/doc`，因此基址不要重复包含该接口路径。该设置只影响经验上传，经验搜索仍使用现有 Chat 接口。
+经验上传调用 `POST https://coreinsight.rnd.huawei.com/chat/experience/experience_add`，使用 Chat 服务基址。通过 `--chat-server` 或 `COREINSIGHT_CHAT_SERVER` 可覆盖基址（需包含 `/chat`）；CLI 追加 `/experience/experience_add`。此前临时新增的 `--memory-server` / `COREINSIGHT_MEMORY_SERVER` 已移除，请改用 Chat 配置。上传不自动重试。
 
 ```bash
 # 下面地址是占位示例，必须替换成后端确认的真实服务基址
-coreinsight-cli --memory-server https://memory.example.internal/gateway experience upload \
+coreinsight-cli --chat-server https://coreinsight.rnd.huawei.com/chat experience upload \
   --scene test --scene_id scene-001 --title 标题 --summary 摘要 --experience 内容
 
 coreinsight-cli --chat-server https://chat.example.internal/chat --debug qa \

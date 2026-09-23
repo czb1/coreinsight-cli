@@ -96,15 +96,6 @@ func parseGlobals(rt *Runtime, args []string) ([]string, error) {
 			// auth login uses the same explicitly supplied server when --server is set.
 			rt.AuthServer = strings.TrimRight(v, "/")
 			serverChanged = true
-		case "--memory-server":
-			v, e := take()
-			if e != nil {
-				return nil, e
-			}
-			rt.MemoryServer = strings.TrimRight(strings.TrimSpace(v), "/")
-			if rt.MemoryServer == "" {
-				return nil, fmt.Errorf("--memory-server 不能为空")
-			}
 		case "--chat-server":
 			v, e := take()
 			if e != nil {
@@ -189,8 +180,7 @@ func rootHelp() {
 
 全局参数:
   --server <url>              Core Insight 地址；对 auth 也作为登录 server 覆盖
-  --memory-server <url>       经验写入服务基址（默认 <server>，包含网关前缀，不含 /memory/experience/doc）
-  --chat-server <url>         问答地址（默认 <server>/chat）
+  --chat-server <url>         Chat 地址，供问答和经验等接口使用（默认 <server>/chat）
   --auth-server <url>         登录地址（默认 https://omtool.rnd.huawei.com）
   --ai-community-server <url> AI Community 地址
   --core-harness-server <url> Core Harness 地址

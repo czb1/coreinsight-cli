@@ -20,7 +20,6 @@ const defaultAuthServer = "https://omtool.rnd.huawei.com"
 
 type Runtime struct {
 	CoreInsightServer string
-	MemoryServer      string
 	ChatServer        string
 	AuthServer        string
 	AICommunityServer string
@@ -46,7 +45,6 @@ func defaultRuntime() (*Runtime, error) {
 	core := strings.TrimRight(envOr("COREINSIGHT_SERVER", "https://coreinsight.rnd.huawei.com"), "/")
 	return &Runtime{
 		CoreInsightServer: core,
-		MemoryServer:      strings.TrimRight(envOr("COREINSIGHT_MEMORY_SERVER", ""), "/"),
 		ChatServer:        strings.TrimRight(envOr("COREINSIGHT_CHAT_SERVER", core+"/chat"), "/"),
 		AuthServer:        strings.TrimRight(envOr("COREINSIGHT_AUTH_SERVER", defaultAuthServer), "/"),
 		AICommunityServer: strings.TrimRight(envOr("COREINSIGHT_AI_COMMUNITY_SERVER", "https://aicommunity.coreai.rnd.huawei.com"), "/"),

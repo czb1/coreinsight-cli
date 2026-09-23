@@ -52,23 +52,23 @@ func TestReportedQARoutes(t *testing.T) {
 	}
 }
 
-func TestExperienceUploadUsesMemoryServer(t *testing.T) {
-	var method, path string
+func TestExperienceUploadUsesChatServer(t *testing.T) {
+	var method, path, cookie string
 	var body map[string]interface{}
 	var decodeErr error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		method, path = r.Method, r.URL.Path
+		method, path, cookie = r.Method, r.URL.Path, r.Header.Get("Cookie")
 		decodeErr = json.NewDecoder(r.Body).Decode(&body)
-		_, _ = w.Write([]byte(`{"code":200,"data":{"version":2,"is_overwrite":true}}`))
+		_, _ = w.Write([]byte(`{"code":200,"msg":"success","data":"3659f967-a733-4045-9b09-c3ba2ad8d9a1"}`))
 	}))
 	defer srv.Close()
-	rt := &Runtime{CoreInsightServer: "http://unused.invalid", MemoryServer: srv.URL + "/gateway/", Timeout: 5 * time.Second, Session: &Session{Username: "tester"}}
-	err := runExperienceUpload(rt, []string{"--scene", "test", "--scene_id", "scene-001", "--title", "标题", "--summary", "摘要", "--experience", "内容", "--doc_id", "existing", "--product_id", "PID-123"})
+	rt := &Runtime{CoreInsightServer: "http://unused.invalid", ChatServer: srv.URL + "/chat/", Timeout: 5 * time.Second, Session: &Session{Username: "tester", Cookie: "sid=test"}}
+	err := runExperienceUpload(rt, []string{"--scene", "test", "--scene_id", "scene-001", "--title", "标题", "--summary", "摘要", "--experience", "内容", "--rag_search_text", "检索内容"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]interface{}{"scene": "test", "scene_id": "scene-001", "title": "标题", "summary": "摘要", "experience": "内容", "user_id": "tester", "doc_id": "existing", "product": map[string]interface{}{"product_id": "PID-123"}}
-	if decodeErr != nil || method != "POST" || path != "/gateway/memory/experience/doc" || !reflect.DeepEqual(body, want) {
+	want := map[string]interface{}{"scene": "test", "scene_id": "scene-001", "title": "标题", "summary": "摘要", "experience": "内容", "user_id": "tester", "rag_search_text": "检索内容"}
+	if decodeErr != nil || method != "POST" || path != "/chat/experience/experience_add" || cookie != "sid=test" || !reflect.DeepEqual(body, want) {
 		t.Fatalf("request=%s %s body=%#v decode=%v", method, path, body, decodeErr)
 	}
 }
@@ -106,37 +106,33 @@ func TestAPIRedirectDoesNotRewritePOST(t *testing.T) {
 	}
 }
 
-func TestMemoryServerConfiguration(t *testing.T) {
-	t.Setenv("COREINSIGHT_SERVER", "https://core.example/")
-	t.Setenv("COREINSIGHT_MEMORY_SERVER", "https://memory.example/gateway/")
-	t.Setenv("COREINSIGHT_CHAT_SERVER", "https://chat.example/")
+func TestUploadChatServerConfiguration(t *testing.T) {
+	t.Setenv("COREINSIGHT_SERVER", "")
+	t.Setenv("COREINSIGHT_CHAT_SERVER", "")
 	t.Setenv("COREINSIGHT_TIMEOUT", "5")
 	rt, err := defaultRuntime()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.memoryEndpoint() != "https://memory.example/gateway/memory/experience/doc" {
-		t.Fatal(rt.memoryEndpoint())
+	if rt.ChatServer != "https://coreinsight.rnd.huawei.com/chat" {
+		t.Fatal(rt.ChatServer)
 	}
-	_, err = parseGlobals(rt, []string{"--memory-server", "https://override.example/api/", "--server", "https://new-core.example"})
-	if err != nil {
-		t.Fatal(err)
+	_, err = parseGlobals(rt, []string{"--server", "https://new-core.example/"})
+	if err != nil || rt.ChatServer != "https://new-core.example/chat" {
+		t.Fatalf("chat=%s err=%v", rt.ChatServer, err)
 	}
-	if rt.memoryEndpoint() != "https://override.example/api/memory/experience/doc" || rt.ChatServer != "https://chat.example" {
-		t.Fatalf("runtime=%#v", rt)
-	}
-	rt.MemoryServer = ""
-	if rt.memoryEndpoint() != "https://new-core.example/memory/experience/doc" {
-		t.Fatal(rt.memoryEndpoint())
+	_, err = parseGlobals(rt, []string{"--chat-server", "https://override.example/chat/", "--server", "https://other.example"})
+	if err != nil || rt.ChatServer != "https://override.example/chat" {
+		t.Fatalf("chat=%s err=%v", rt.ChatServer, err)
 	}
 }
 
 func TestRequestDiagnostics(t *testing.T) {
-	u, _ := url.Parse("https://user:secret@example.com/memory/experience/doc?token=secret")
+	u, _ := url.Parse("https://user:secret@example.com/chat/experience/experience_add?token=secret")
 	req := &http.Request{Method: "POST", URL: u}
 	resp := &http.Response{StatusCode: 405, Status: "405 Method Not Allowed", Request: req, Header: http.Header{"Allow": []string{"GET"}}}
 	msg := httpStatusError(resp).Error()
-	if !strings.Contains(msg, "POST https://example.com/memory/experience/doc") || !strings.Contains(msg, "Allow=GET") || strings.Contains(msg, "secret") {
+	if !strings.Contains(msg, "POST https://example.com/chat/experience/experience_add") || !strings.Contains(msg, "Allow=GET") || strings.Contains(msg, "secret") {
 		t.Fatal(msg)
 	}
 	err := requestError(req, &net.DNSError{Err: "no such host", Name: "example.com"})

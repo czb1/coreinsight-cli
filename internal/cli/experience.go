@@ -134,7 +134,7 @@ func runExperienceUpload(rt *Runtime, args []string) error {
 	if len(product) > 0 {
 		body["product"] = product
 	}
-	resp, payload, err := rt.doJSON("POST", rt.memoryEndpoint(), body, true)
+	resp, payload, err := rt.doJSON("POST", strings.TrimRight(rt.ChatServer, "/")+"/experience/experience_add", body, true)
 	if err != nil {
 		return emitReqErr(err)
 	}
