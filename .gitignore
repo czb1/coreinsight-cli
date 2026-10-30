@@ -1,4 +1,5 @@
-coreinsight-cli
-coreinsight-cli.exe
+/coreinsight-cli
+/coreinsight-cli.exe
 skills/
 *.zip
+
