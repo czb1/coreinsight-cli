@@ -154,6 +154,8 @@ coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 
 `skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录凭证（浏览器登录使用 `X-Auth-Token`，账号密码登录使用 Cookie），返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
 
+每个 Skill 的 `versions` 数组仅保留最新的一条，保留该版本的 `version`、`downloadUrl`、`uploadDate` 及其他字段。优先选择有效 `uploadDate` 中时间最新的版本；时间相同或均缺失/无效时，按数字分段比较版本号（例如 `0.2.10` 大于 `0.2.9`，支持 `v` 前缀）；仍无法区分时保留接口中靠前的一条。无时区的上传时间按北京时间解析。Skill 列表和其他字段不变，空或缺失的 `versions` 保持原样。
+
 `skill scene-search` 已移除，不保留别名或关键词拼接逻辑。已有场景查询调用请迁移到 `skill scene-skills`，将原 `--product` 改为 `--dim_name`，并补充 `--dim_type "产品级"`。
 
 `skill search` 用于通用关键词检索，调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。默认完整 URL 为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。需要查询指定产品和场景下的 Skill 时使用 `skill scene-skills`。

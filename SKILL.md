@@ -111,6 +111,8 @@ coreinsight-cli skill scene-skills --first_scene "需求开发" --second_scene "
 
 `scene-skills` 的四个参数均必填，分别映射为 `{firstScene, secondScene, dimType, dimName}`，调用 `POST /experience/harness/scene/skills`。`scene-search` 已移除，不得再调用，也不要将产品和场景拼接成关键词替代场景查询。通用搜索仅用 `skill search --query`。
 
+读取每个 Skill 的 `versions` 时，按最多一条最新版本处理，使用其中真实返回的 `version`、`downloadUrl` 和 `uploadDate`。CLI 优先按有效上传时间选取最新版本（无时区时间按北京时间）；时间相同或均无有效时间时按数字分段版本号比较，仍无法区分时保留接口中靠前的一条。空或缺失的版本信息不代表已确认版本，不补造历史版本。
+
 `skill scenes --repo` 和 `skill offering --repo` 接收本地仓库目录，依赖该目录的 `origin`；不要把远程 URL 传给 `--repo`，没有 origin 时不要伪造。已知真实仓库 URL 时使用 `skill offering --http_url`。
 
 ### 核对候选

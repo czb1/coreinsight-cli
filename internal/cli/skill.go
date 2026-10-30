@@ -215,7 +215,7 @@ func runSkillSceneSkills(rt *Runtime, args []string) error {
 		"second_scene": secondScene,
 		"dim_type":     dimType,
 		"dim_name":     dimName,
-		"skills":       dataField(payload),
+		"skills":       latestSceneSkillVersions(dataField(payload)),
 	})
 	return nil
 }
@@ -391,6 +391,7 @@ func skillHelp() {
 
 场景 Skill 查询使用 scene-skills，四个参数分别作为结构化字段发送到
     POST /experience/harness/scene/skills；产品级场景使用 --dim_type "产品级"。
+每个场景 Skill 的 versions 仅保留最新一条：优先按 uploadDate，时间相同或均无有效时间时比较数字版本号。
 下载/上传/校验自动从登录会话读取 caller_id，映射为市场接口既有 userId；不接受 --user_id。
 可选 --caller_id 仅校验与会话一致，不能覆盖身份。
 --version 可选；不传时由服务端选择版本，CLI 不硬编码版本或擅自补 latest。
