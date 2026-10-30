@@ -86,12 +86,18 @@ func (s *Session) expired() (bool, string) {
 	if s == nil {
 		return true, "no_session"
 	}
+	if s.Token != "" && !validBearerToken(s.Token) {
+		return true, "invalid_token"
+	}
+	if s.Token == "" && strings.TrimSpace(s.Cookie) == "" {
+		return true, "no_credentials"
+	}
 	if s.ExpiresAt == "" {
 		return false, ""
 	}
 	t, err := time.Parse(time.RFC3339, s.ExpiresAt)
 	if err != nil {
-		return false, ""
+		return true, "invalid_expiry"
 	}
 	if time.Now().After(t) {
 		return true, "cookie_expired"

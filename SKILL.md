@@ -13,17 +13,22 @@ metadata:
 
 1. 用 `command -v coreinsight-cli` 或平台等效命令检查 CLI；也检查项目内已安装的入口。找到本地入口后，后续命令使用其实际路径。
 2. 运行 `coreinsight-cli --help`、`coreinsight-cli version`，按需读取子命令的 `--help`。以安装版本的帮助为准，不猜测参数。
-3. 运行 `coreinsight-cli auth status`。退出码 `0` 表示本地会话有效；`3` 表示未认证或已过期。其他失败按真实错误处理。
-4. 未登录时，引导用户在自己的终端运行 `coreinsight-cli auth login`，输入工号和密码；若环境已有安全注入的认证信息，可直接使用。不要让用户把密码发到对话中，不读取或展示 `~/.coreinsight-cli/session.json`。
-5. 登录后再次检查状态，再继续原任务。状态有效仅证明本地会话未过期；后端拒绝认证时仍需重新登录。
+3. 运行 `coreinsight-cli auth status`。退出码 `0` 仅表示本地存在格式有效且未标记过期的凭证；`3` 表示缺失、无效或过期。`server_verified: false` 表示没有服务端验证，不能说“已验证登录成功”。其他失败按真实错误处理。
+4. 用户明确要求登录/重新登录，或本地凭证不可用时，执行默认的 `coreinsight-cli auth login`，尝试打开用户浏览器。不要仅因使用 Agent、Bash 或子进程而加 `--no-browser`。只有用户要求手动打开，或已确认是无桌面的 SSH/容器/CI 环境时，才使用该参数。
+5. 保持登录进程运行并等待最终退出码及 JSON-RPC 结果。需要手动打开时，及时展示 stderr 中本次授权链接，让用户在命令等待期间打开；必要时使用 `auth login --timeout 120`。启动浏览器失败时使用 CLI 已打印的当前链接，不反复重启登录使链接失效或混淆。不声称浏览器启动命令成功就代表窗口可见或用户已确认。
+6. 登录命令返回错误时按失败处理；授权失败时旧会话会保留，不得凭后续 `auth status` 为 `0` 覆盖这次失败。成功时说明“已获取并保存本次授权返回的凭证”，再继续用户已授权的原业务任务；以该业务请求实际响应判断后端是否接受凭证。不为验证登录擅自上传资料或编造身份查询接口。
 
-脚本已安全注入密码时，用标准输入，勿将真实密码写入命令参数、文件或日志：
+登录命令：
 
 ```bash
-printf '%s\n' "$COREINSIGHT_AUTH_PASSWORD" | coreinsight-cli auth login --username "$COREINSIGHT_AUTH_USERNAME" --password-stdin
+coreinsight-cli auth login
+# 仅在用户选择手动打开或已确认无桌面时使用：
+coreinsight-cli auth login --no-browser --timeout 120
 ```
 
-CLI 支持 `COREINSIGHT_AUTH_USERNAME` / `COREINSIGHT_AUTH_PASSWORD`，兼容 `OMRES_AUTH_USERNAME` / `OMRES_AUTH_PASSWORD`。勿打印其值。仅在用户要求退出时执行 `auth logout`。
+每次显式登录使用新的随机 `fromSource`，不复用机器固定标识取回历史 token；`--no-browser` 不会绕过本次授权。浏览器已有 SSO 会话时可能自动完成授权，不保证逐次输入密码或点击确认。`saved_at` 只是本地保存时间，不能据此推断用户何时完成过浏览器授权；没有 `expires_at` 也不证明永久有效。
+
+不使用已移除的 `--username`、`--password-stdin` 或旧密码环境变量登录，不让用户把密码发到对话中，不读取或展示 `~/.coreinsight-cli/session.json`。仅在用户要求退出时执行 `auth logout`，并说明它只删除本地凭证，不撤销服务端授权或浏览器 SSO。
 
 ### CLI 不存在时
 
@@ -57,7 +62,7 @@ agentcenter cli add coreinsight-cli@1.0.0
 coreinsight-cli skill search --query "数据库 SQL 调优" --page 1 --page_size 6 --sort_by downloads --sort_order desc
 ```
 
-替换为真实任务关键词。命中不足时改写关键词或翻页；默认至多 3 组关键词、每组 2 页，无合适结果就明确报告，不无限搜索。
+替换为真实任务关键词。命中不足时改写关键词或翻页；默认至多 3 组关键词、每组 2 页，无合适结果就明确报告，不无限搜索。使用当前命令 `skill search`，不使用旧命令 `skill search-smart`。
 
 ### 产品与场景查询
 
@@ -91,7 +96,7 @@ coreinsight-cli skill scene-skills --first_scene "需求开发" --second_scene "
 
 `scene-skills` 的四个参数均必填，分别映射为 `{firstScene, secondScene, dimType, dimName}`，调用 `POST /experience/harness/scene/skills`。`scene-search` 已移除，不得再调用，也不要将产品和场景拼接成关键词替代场景查询。通用搜索仅用 `skill search --query`。
 
-`skill scenes` 和 `skill offering --repo` 依赖仓库 `origin`，没有 origin 时不要伪造；已知真实仓库 URL 时使用 `skill offering --http_url`。
+`skill scenes --repo` 和 `skill offering --repo` 接收本地仓库目录，依赖该目录的 `origin`；不要把远程 URL 传给 `--repo`，没有 origin 时不要伪造。已知真实仓库 URL 时使用 `skill offering --http_url`。
 
 ### 核对候选
 
@@ -102,7 +107,7 @@ coreinsight-cli skill scene-skills --first_scene "需求开发" --second_scene "
 ### 下载、检查、放置、加载并继续
 
 ```bash
-coreinsight-cli skill download --skill_id "<实际 Skill ID>" --version "<实际版本>" --output ./skill-staging
+coreinsight-cli skill download --user_id "<实际工号>" --skill_id "<实际 Skill ID>" --version "<实际版本>" --output ./skill-staging
 ```
 
 1. 下载到新的临时目录，检查真实文件；不假设 `--output` 会直接生成可加载目录，也不假设 CLI 一定已经解压。
@@ -121,41 +126,41 @@ coreinsight-cli skill download --skill_id "<实际 Skill ID>" --version "<实际
 `--kb_sns`、`--products`、`--departments`、`--scenes` 四个路由必须且只能选一个，多值用逗号分隔。依据用户信息或已核实上下文选择，不编造知识库编号；缺少路由且无法推断时询问用户。
 
 ```bash
-coreinsight-cli rag --qa --query "问题" --kb_sns "123,456" --prompt_template SDD
-coreinsight-cli rag --retrieve --query "问题" --products "UPCF,UDG"
+coreinsight-cli rag --qa --user_id "<实际工号>" --query "问题" --kb_sns "123,456" --prompt_template SDD
+coreinsight-cli rag --retrieve --user_id "<实际工号>" --query "问题" --products "UPCF,UDG"
 ```
 
-替换示例值。仅在明确需要且模板可用时指定 `--prompt_template`。`user_id` 默认取登录工号，也可传 `--user_id`。回答时区分检索原文与推断，保留实际返回的来源，不虚构引文。
+替换示例值。仅在明确需要且模板可用时指定 `--prompt_template`。浏览器登录不保存工号，RAG、Skill 下载/上传/校验、经验上传需显式传 `--user_id`。使用用户提供或已核实的工号，缺失时询问，不从操作系统用户名猜测。回答时区分检索原文与推断，保留实际返回的来源，不虚构引文。
 
 ## 4. 经验检索与授权写入
 
 默认按标题检索；需要匹配补充检索文本时指定 `rag_search_text`：
 
 ```bash
-coreinsight-cli experience search --query "智能客服系统" --page 1 --page_size 5 --scene ALL
-coreinsight-cli experience search --query "智能客服系统" --search_field rag_search_text --departments "云核心网维护部,网络产品部" --products "UPCF,UDG" --scene ALL
+coreinsight-cli experience search --caller_id "<实际调用方工号>" --query "智能客服系统" --page 1 --page_size 5 --scene ALL
+coreinsight-cli experience search --caller_id "<实际调用方工号>" --query "智能客服系统" --search_field rag_search_text --departments "云核心网维护部,网络产品部" --products "UPCF,UDG" --scene ALL
 ```
 
 - 此处 `--departments` 与 `--products` 可以同时指定，按 AND 叠加过滤，各自支持逗号分隔；勿套用 RAG 路由互斥规则。
-- `caller_id` 默认取登录工号；`user_id` 未指定时为空，检索全部贡献者。仅按目标贡献者过滤时传 `--user_id`，不要自动填当前工号。
+- 浏览器登录不保存工号，调用方身份需显式传 `--caller_id`；`user_id` 未指定时为空，检索全部贡献者。仅按目标贡献者过滤时传 `--user_id`，不要自动填当前工号。
 - 显式 `--caller_id` / `--user_id` 优先，但不能绕过登录。
 
 仅在用户请求或原任务明确授权时执行上传与远程校验；检索或下载授权不包含自动上传经验、Skill 或项目资料：
 
 ```bash
-coreinsight-cli experience upload --scene "test" --scene_id "scene-001" --title "标题" --summary "摘要" --experience "经验正文" --rag_search_text "检索关键词"
-coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
-coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli experience upload --user_id "<实际工号>" --scene "test" --scene_id "scene-001" --title "标题" --summary "摘要" --experience "经验正文" --rag_search_text "检索关键词"
+coreinsight-cli skill verify --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill upload --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
 ```
 
-替换占位值并核对文件。`verify` 同样发送文件到服务，不用它代替下载后的本地检查。经验上传核心字段为 `user_id`、`title`、`summary`、`scene_id`、`scene`、`experience`、`rag_search_text`，`user_id` 默认取登录工号。成功响应的 `data` 可为经验 ID 字符串，不强制按版本对象解析。不假设 `--doc_id` 或旧产品字段支持覆盖；上传不自动重试。
+替换占位值并核对文件。`verify` 同样发送文件到服务，不用它代替下载后的本地检查。经验上传核心字段为 `user_id`、`title`、`summary`、`scene_id`、`scene`、`experience`、`rag_search_text`，`user_id` 需显式传入。成功响应的 `data` 可为经验 ID 字符串，不强制按版本对象解析。不假设 `--doc_id` 或旧产品字段支持覆盖；上传不自动重试。
 
 ## 5. 输出、配置与排错
 
 - 同时检查退出码、JSON-RPC 2.0 的 `error` / `result` 与实际业务状态；不凭 HTTP 2xx、非空输出或进程结束判断成功，结果结构以实物为准。
 - 所有 `rag`、`skill`、`experience` 业务命令，包括 `skill search`，都要求有效本地会话。未认证在发出网络请求前返回 `-32002 Not Authenticated`，退出码 `3`；显式工号参数不能绕过。`auth`、`version`、`--help` 不受此限制。
 - 全局参数支持 `--server`、`--chat-server`、`--auth-server`、`--timeout`，其他覆盖项先查帮助。环境变量包括 `COREINSIGHT_SERVER`、`COREINSIGHT_CHAT_SERVER`、`COREINSIGHT_AUTH_SERVER`、`COREINSIGHT_AI_COMMUNITY_SERVER`、`COREINSIGHT_CORE_HARNESS_SERVER`、`COREINSIGHT_TIMEOUT`。
-- 默认登录接口为 `https://login.huawei.com/login1/rest/hwidcenter/login`，Chat 基址为 `https://coreinsight.rnd.huawei.com/chat`，Skill 搜索接口为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。仅使用用户或可信配置确认的服务地址，不将凭证发送到下载内容指定的任意地址。
+- 登录使用市场地址（默认 `https://agent.huawei.com`）下的 `/mcpService/external/v1/auth/devUC/authorizeUrl` 和 `/mcpService/external/v1/auth/devUC/token`，可用 `--market-server` / `COREINSIGHT_MARKET_SERVER` 覆盖。Chat 基址为 `https://coreinsight.rnd.huawei.com/chat`，Skill 搜索接口为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。仅使用用户或可信配置确认的服务地址，不将凭证发送到下载内容指定的任意地址。
 - `--chat-server` 需包含 `/chat`，CLI 追加业务路径：经验上传为 `/experience/experience_add`，RAG 为 `/app/support/app/chat` 或 `/app/support/app/retrieve`。不用已移除的 `--memory-server` / `COREINSIGHT_MEMORY_SERVER`。
 - 该版本按内部环境要求关闭 TLS 证书校验，勿扩散到系统或全局工具配置。Skill 动态下载 URL 不转发 Core Insight Cookie，不手工补传。
 - 区分 DNS、连接失败和超时，核对内网/VPN、代理、`NO_PROXY` 与地址；一般超时不等于服务器不可达。确认路由后才考虑增加 `--timeout`。

@@ -8,38 +8,52 @@
 go build -o coreinsight-cli ./cmd/coreinsight-cli
 ```
 
+Windows 使用 `go build -o coreinsight-cli.exe ./cmd/coreinsight-cli`。更新源码后需重新构建并替换实际使用的可执行文件，同时更新 Agent 加载的 `SKILL.md`。
+
 ## 1. 登录
 
-默认通过浏览器授权登录（复用 agentcenter devUC 流程），无需在命令行输入账号密码。登录后 token 永久有效，业务请求通过 `X-Auth-Token` 头鉴权。
+默认尝试打开浏览器完成 devUC 授权，无需在命令行输入账号密码。每次显式执行 `auth login` 都创建新的授权事务，业务请求使用保存的 token 通过 `X-Auth-Token` 头鉴权。客户端没有服务端有效期信息，不将其解释为“永久有效”。
 
 ```bash
 # 默认：自动打开浏览器完成授权
 coreinsight-cli auth login
 
-# 无头 / CI 环境，或浏览器未自动弹出时，仅打印授权链接供手动复制
+# 用户明确要求手动打开，或已确认无桌面环境时：打印链接，继续等待本次授权
 coreinsight-cli auth login --no-browser
 
 # 自定义授权轮询超时秒数（默认 60）
 coreinsight-cli auth login --timeout 120
 
-# 查看本地认证状态
+# 仅检查本地凭证，不请求服务端验证
 coreinsight-cli auth status
 
-# 清除本地会话
+# 仅清除本地会话，不撤销服务端 token 或浏览器 SSO
 coreinsight-cli auth logout
 ```
 
 登录流程：
 
-1. CLI 向市场服务请求 devUC 授权页 URL：`GET <market>/mcpService/external/v1/auth/devUC/authorizeUrl?fromSource=<key>`。
-2. 自动打开默认浏览器（`--no-browser` 则仅打印链接供手动复制）。Windows 上用 `powershell Start-Process` 启动浏览器，使其绑定到用户交互桌面会话；无桌面会话环境（Agent 沙箱、CI）请使用 `--no-browser`。
-3. 用户在浏览器完成授权，CLI 轮询后端 `GET <market>/mcpService/external/v1/auth/devUC/token?fromSource=<key>` 获取 token。
-4. token 本地保存到 `~/.coreinsight-cli/session.json`（目录 0700、文件 0600），不设过期时间；后续业务请求通过 `X-Auth-Token` 头发送。
-5. `auth status` 的退出码为：`0` 已认证，`3` 未认证。
+1. 使用加密随机源生成本次登录专用的 256 位 `fromSource`（64 位十六进制字符串），请求 `GET <market>/mcpService/external/v1/auth/devUC/authorizeUrl?fromSource=<key>`。不再使用用户名和主机名派生的固定标识。
+2. 校验授权 URL 后，尝试打开默认浏览器，并向 stderr 打印链接。Windows 使用 `powershell Start-Process`；CLI 等待启动命令退出并报告错误。启动命令成功不保证窗口可见，也不证明用户已确认。不能仅因命令由 Agent/Bash 子进程执行就默认加 `--no-browser`。
+3. 用本次相同的 `fromSource` 轮询 `GET <market>/mcpService/external/v1/auth/devUC/token?fromSource=<key>`。已有浏览器 SSO 可能自动完成授权，不一定再次要求输入密码或点击确认。`--no-browser` 仅关闭自动打开，不跳过授权；应在命令等待期间手动打开本次链接。
+4. 严格检查 HTTP 状态、响应类型及 JSON 业务成功状态。空响应、JSON `null`、成功响应中的空 `data` / `data: null` 继续等待；HTTP/业务错误、HTML、对象/数字类型 token、无效 token 格式均不会保存。保留纯字符串 token 格式兼容，不把错误 JSON 整体转成 token。
+5. 只在收到格式有效的 token 后保存到 `~/.coreinsight-cli/session.json`（请求创建目录 0700、文件 0600；实际权限遵循操作系统）。授权失败保留已有会话，不能据旧会话的 `auth status` 把这次失败说成成功。
 
-devUC token 是市场域凭证，由后端直接作为业务鉴权，无需额外 Cookie。`fromSource` 由 `SHA256(username + hostname + salt)` 派生，使用 coreinsight-cli 自有 salt，与 agentcenter 会话隔离。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场服务地址（默认 `https://agent.huawei.com`）。
+devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场地址（默认 `https://agent.huawei.com`）。`auth login --timeout 120` 设置 token 轮询总时限；放在命令之前的 `--timeout` 设置单次 HTTP 请求超时，例如 `coreinsight-cli --timeout 15 auth login --timeout 120`。
 
-> **登录前置要求**：`rag`、`skill`、`experience` 的所有业务命令都必须在本地存在登录会话后才能执行。未登录或会话过期时，命令在发出任何网络请求前即被拦截，返回 JSON-RPC 错误 `-32002 Not Authenticated`，退出码为 `3`。`auth`、`version` 及所有 `--help` 帮助输出不受影响。
+认证输出说明：
+
+| 字段 / 退出码 | 含义 |
+| --- | --- |
+| `authenticated: true`、`credential_state: "stored"` | 为兼容旧脚本保留；表示本地持有格式有效且未标记过期的凭证，不证明业务接口接受它 |
+| `server_verified: false` | 未通过业务接口或身份接口验证凭证；CLI 没有臆造在线验证接口 |
+| `browser_launcher_succeeded` | 本次登录的浏览器启动命令是否成功退出，不等于窗口可见或用户点击了授权 |
+| `saved_at` | 本地写入凭证的时间，不是浏览器授权时间 |
+| `auth status` 退出码 `0` / `3` | 本地凭证通过检查 / 缺失、格式无效或过期；不请求服务端 |
+
+升级后，旧版本误存的 `<nil>`、错误 JSON 等明显无效凭证会被本地检查拦截。用户要求重新登录时直接执行 `auth login`；正常执行已授权的业务任务时可以复用现有本地凭证。服务端仍可撤销或拒绝凭证，以业务请求的实际响应为准。
+
+> **登录前置要求**：`rag`、`skill`、`experience` 的所有业务命令都必须通过本地会话检查。会话缺失、无效或过期时，命令在发出网络请求前返回 JSON-RPC 错误 `-32002`，退出码 `3`。`auth`、`version` 及所有 `--help` 帮助输出不受影响。
 
 ## 2. 知识问答 / 检索（rag）
 
@@ -51,6 +65,7 @@ devUC token 是市场域凭证，由后端直接作为业务鉴权，无需额�
 # 问答模式
 coreinsight-cli rag \
   --qa \
+  --user_id "<实际工号>" \
   --query "问题" \
   --kb_sns 123,456 \
   --prompt_template SDD
@@ -58,6 +73,7 @@ coreinsight-cli rag \
 # 纯检索模式
 coreinsight-cli rag \
   --retrieve \
+  --user_id "<实际工号>" \
   --query "问题" \
   --products UPCF,UDG
 ```
@@ -89,21 +105,22 @@ coreinsight-cli skill search \
   --sort_order desc
 
 coreinsight-cli skill download \
+  --user_id "<实际工号>" \
   --skill_id "bca61fb0-3734-49c0-906e-0209d17032fd" \
   --version "0.0.1" \
   --output ./skills
 
-coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
-coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill upload --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill verify --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
 ```
 
-`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
+`skill scenes --repo` 的参数必须是本地 Git 仓库目录（例如 `.` 或 `D:\projects\uscdb`），不能传远程 URL；只有 URL 时使用上面的 `offering --http_url` 和 `product-scenes` 两步查询。`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
 
 `skill offering` 只执行 `skill scenes` 的第一步：把代码仓 URL（由 `--repo` 解析 origin，或由 `--http_url` 直接指定）发送到 Core Harness `POST /core-harness/api/v1/offering/list`，body 为 `{page, pageSize=20, http_url}`，返回该代码仓归属的产品列表。该产品列表请求不携带会话 Cookie，但仍需通过本地登录校验（与 `skill scenes` 一致）。
 
-`skill product-scenes` 执行第二步：用 `--dim_code`（取上一步返回的 `offering_id`）调用 Chat `POST /experience/harness/scenes`，body 为 `{dimCode}`，携带会话 Cookie，返回该产品的场景列表。
+`skill product-scenes` 执行第二步：用 `--dim_code`（取上一步返回的 `offering_id`）调用 Chat `POST /experience/harness/scenes`，body 为 `{dimCode}`，携带登录凭证（新登录使用 `X-Auth-Token`，兼容旧 Cookie），返回该产品的场景列表。
 
-`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录会话凭证，返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
+`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录凭证（新登录使用 `X-Auth-Token`，兼容旧 Cookie），返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
 
 `skill scene-search` 已移除，不保留别名或关键词拼接逻辑。已有场景查询调用请迁移到 `skill scene-skills`，将原 `--product` 改为 `--dim_name`，并补充 `--dim_type "产品级"`。
 
@@ -115,6 +132,7 @@ coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 
 ```bash
 coreinsight-cli experience search \
+  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --page 1 \
   --page_size 5 \
@@ -122,23 +140,27 @@ coreinsight-cli experience search \
 
 # 指定检索字段为 rag_search_text（默认 title，按标题检索）
 coreinsight-cli experience search \
+  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --search_field rag_search_text \
   --scene ALL
 
 # 按部门过滤（后端映射 product.pdu_name，多个用逗号分隔）
 coreinsight-cli experience search \
+  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --departments "云核心网维护部,网络产品部" \
   --scene ALL
 
 # 按产品名称过滤（后端映射 product.product_name，多个用逗号分隔）
 coreinsight-cli experience search \
+  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --products "UPCF,UDG" \
   --scene ALL
 
 coreinsight-cli experience upload \
+  --user_id "<实际工号>" \
   --scene "test" \
   --scene_id "scene-001" \
   --title "在U2020上执行MML命令" \
@@ -186,10 +208,11 @@ coreinsight-cli --server https://example.internal --timeout 300 rag --qa ...
 ```bash
 # 下面地址是占位示例，必须替换成后端确认的真实服务基址
 coreinsight-cli --chat-server https://coreinsight.rnd.huawei.com/chat experience upload \
+  --user_id "<实际工号>" \
   --scene test --scene_id scene-001 --title 标题 --summary 摘要 --experience 内容
 
 coreinsight-cli --chat-server https://chat.example.internal/chat --debug rag \
-  --qa --query "问题" --kb_sns 123
+  --qa --user_id "<实际工号>" --query "问题" --kb_sns 123
 ```
 
 - `--chat-server` 指向 Chat 基址（默认 `<COREINSIGHT_SERVER>/chat`），CLI 会追加 `/app/support/app/chat` 或 `/app/support/app/retrieve`。环境变量末尾的斜杠会先移除，避免生成 `//chat`。

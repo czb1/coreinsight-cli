@@ -15,29 +15,35 @@ func TestDefaultMarketServer(t *testing.T) {
 	}
 }
 
-func TestFromSourceStable(t *testing.T) {
-	a := defaultFromSource()
-	b := defaultFromSource()
-	if a == "" || a != b {
-		t.Fatalf("fromSource must be non-empty and stable: %q vs %q", a, b)
+func TestFromSourceUnique(t *testing.T) {
+	a, err := defaultFromSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := defaultFromSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a) != 64 || len(b) != 64 || a == b {
+		t.Fatal("each login needs an independent 256-bit authorization identifier")
 	}
 }
 
 func TestExtractTokenFromString(t *testing.T) {
-	if got := extractToken([]byte(`abc-token-123`)); got != "abc-token-123" {
-		t.Fatalf("extractToken string=%q", got)
+	if got, err := extractToken([]byte(`abc-token-123`)); err != nil || got != "abc-token-123" {
+		t.Fatalf("extractToken string=%q err=%v", got, err)
 	}
 }
 
 func TestExtractTokenFromJSON(t *testing.T) {
-	if got := extractToken([]byte(`{"code":200,"data":"tok-xyz"}`)); got != "tok-xyz" {
-		t.Fatalf("extractToken json=%q", got)
+	if got, err := extractToken([]byte(`{"code":200,"data":"tok-xyz"}`)); err != nil || got != "tok-xyz" {
+		t.Fatalf("extractToken json=%q err=%v", got, err)
 	}
-	if got := extractToken([]byte(`{"code":200,"data":""}`)); got != "" {
-		t.Fatalf("extractToken empty data=%q", got)
+	if got, err := extractToken([]byte(`{"code":200,"data":""}`)); err != nil || got != "" {
+		t.Fatalf("extractToken empty data=%q err=%v", got, err)
 	}
-	if got := extractToken([]byte(``)); got != "" {
-		t.Fatalf("extractToken empty body=%q", got)
+	if got, err := extractToken([]byte(``)); err != nil || got != "" {
+		t.Fatalf("extractToken empty body=%q err=%v", got, err)
 	}
 }
 

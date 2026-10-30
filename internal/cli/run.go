@@ -92,11 +92,11 @@ func requireAuthenticated(rt *Runtime, command string) error {
 		return errUnauthenticated
 	}
 	if expired, reason := rt.Session.expired(); expired {
-		failure(requestID(), codeUnauthenticated, "Session Expired", map[string]interface{}{
+		failure(requestID(), codeUnauthenticated, "Session Invalid", map[string]interface{}{
 			"authenticated": false, "reason": reason, "command": command,
 			"username": rt.Session.Username, "saved_at": rt.Session.SavedAt,
 			"expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(),
-			"hint": "会话已过期，请重新执行: coreinsight-cli auth login（浏览器授权登录）",
+			"hint": "本地会话无效或已过期，请重新执行: coreinsight-cli auth login（浏览器授权登录）",
 		})
 		return errUnauthenticated
 	}
@@ -161,6 +161,12 @@ func parseGlobals(rt *Runtime, args []string) ([]string, error) {
 			v, e := take()
 			if e != nil {
 				return nil, e
+			}
+			// After auth login, --timeout belongs to the authorization polling
+			// deadline. A timeout before the command remains an HTTP timeout.
+			if len(out) >= 2 && out[0] == "auth" && out[1] == "login" {
+				out = append(out, a, v)
+				continue
 			}
 			var n int
 			if _, e = fmt.Sscanf(v, "%d", &n); e != nil || n <= 0 {

@@ -98,8 +98,8 @@ func TestLoginIdentityPersistsAcrossRuntime(t *testing.T) {
 	if reloaded.Session == nil || reloaded.Session.Token != "persist-token" {
 		t.Fatalf("token not persisted: %v", reloaded.Session)
 	}
-	// token 永久有效，不设过期时间。
+	// 后端未返回有效期；客户端不猜测到期时间。
 	if reloaded.Session.ExpiresAt != "" {
-		t.Fatalf("ExpiresAt should be empty for permanent token, got %q", reloaded.Session.ExpiresAt)
+		t.Fatalf("ExpiresAt should be empty when not supplied, got %q", reloaded.Session.ExpiresAt)
 	}
 }
