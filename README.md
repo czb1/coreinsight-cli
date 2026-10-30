@@ -76,10 +76,10 @@ coreinsight-cli skill product-scenes --dim_code P001
 
 # 查询某场景下的 skill 列表（第三步）
 coreinsight-cli skill scene-skills \
-  --first_scene 研发 \
-  --second_scene 代码开发 \
-  --dim_type product \
-  --dim_name 测试产品
+  --first_scene "需求开发" \
+  --second_scene "MML开发" \
+  --dim_type "产品级" \
+  --dim_name "UPCF"
 
 coreinsight-cli skill search \
   --query "数据库" \
@@ -87,15 +87,6 @@ coreinsight-cli skill search \
   --page_size 6 \
   --sort_by downloads \
   --sort_order desc
-
-# 场景搜索也使用 AI Community 智能检索
-coreinsight-cli skill scene-search --query "333"
-
-# 兼容旧参数，按产品、一级场景、二级场景顺序用空格拼接为 keyword
-coreinsight-cli skill scene-search \
-  --product "UNC USMF" \
-  --first_scene "需求开发" \
-  --second_scene "MML开发"
 
 coreinsight-cli skill download \
   --skill_id "bca61fb0-3734-49c0-906e-0209d17032fd" \
@@ -112,9 +103,11 @@ coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 
 `skill product-scenes` 执行第二步：用 `--dim_code`（取上一步返回的 `offering_id`）调用 Chat `POST /experience/harness/scenes`，body 为 `{dimCode}`，携带会话 Cookie，返回该产品的场景列表。
 
-`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带会话 Cookie，返回该场景下的 skill 列表。
+`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录会话凭证，返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
 
-`skill search` 调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。`skill scene-search` 使用相同的 GET 接口和分页、排序默认值。支持 `--query`；未提供非空 `--query` 时，将 `--product`、`--first_scene`、`--second_scene` 的非空值按顺序用空格拼接为 `keyword`（智能关键词搜索，不是结构化场景过滤）。默认完整 URL 为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。
+`skill scene-search` 已移除，不保留别名或关键词拼接逻辑。已有场景查询调用请迁移到 `skill scene-skills`，将原 `--product` 改为 `--dim_name`，并补充 `--dim_type "产品级"`。
+
+`skill search` 用于通用关键词检索，调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。默认完整 URL 为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。需要查询指定产品和场景下的 Skill 时使用 `skill scene-skills`。
 
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 

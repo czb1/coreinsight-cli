@@ -2,7 +2,7 @@
 name: coreinsight-cli
 description: 使用 Core Insight CLI 搜索、下载和获取缺失的 Skill，并执行华为内网知识问答、知识检索、场景查询、经验检索及经授权的上传和校验。当 Agent 执行任务发现缺少 Skill、需要查找可复用能力或下载安装 Skill，或用户提到 coreinsight-cli、Core Insight、AI Community 技能市场及经验检索时使用。
 metadata:
-  version: 1.0.2
+  version: 1.0.3
 ---
 
 # Core Insight CLI
@@ -51,22 +51,47 @@ agentcenter cli add coreinsight-cli@1.0.0
 
 1. 描述原任务缺少的具体能力，提取产品、技术或业务场景关键词。不要仅因没有同名 Skill 就认定任务无法完成。
 2. 检查当前 Agent 的 Skill 清单，有适用 Skill 就读取使用。
-3. 没有适用项时完成认证检查，然后搜索：
+3. 没有适用项时完成认证检查。业务相关任务先按下述“产品与场景查询”流程获取场景下的 Skill；需要通用能力或没有合适的场景候选时，按任务关键词搜索：
 
 ```bash
 coreinsight-cli skill search --query "数据库 SQL 调优" --page 1 --page_size 6 --sort_by downloads --sort_order desc
 ```
 
-替换为真实任务关键词。命中不足时改写关键词或翻页；默认至多 3 组关键词、每组 2 页，无合适结果就明确报告，不无限搜索。`skill search-smart` 仅为兼容别名。
+替换为真实任务关键词。命中不足时改写关键词或翻页；默认至多 3 组关键词、每组 2 页，无合适结果就明确报告，不无限搜索。
 
-需要仓库产品或场景信息时使用：
+### 产品与场景查询
+
+1. 从代码仓获取产品：
+
+```bash
+coreinsight-cli skill offering --repo .
+# 只有仓库 URL 时直接指定
+coreinsight-cli skill offering --http_url "https://codehub-y.huawei.com/pcc_db_tools/uscdb"
+```
+
+2. 从实际返回中选择相关产品，用 `offering_id` 查询场景：
+
+```bash
+coreinsight-cli skill product-scenes --dim_code "<实际 offering_id>"
+```
+
+有本地仓库时也可用下面的命令一次完成前两步；结果已包含产品和场景，不重复查询：
 
 ```bash
 coreinsight-cli skill scenes --repo .
-coreinsight-cli skill scene-search --query "UNC USMF 需求开发 MML开发"
 ```
 
-`skill scenes` 依赖仓库 `origin`，没有 origin 时不要伪造。`scene-search` 是智能关键词搜索，并非结构化场景过滤；兼容参数 `--product`、`--first_scene`、`--second_scene` 的非空值按此顺序用空格拼接。
+3. 按任务描述和技术语言选择实际返回的场景，用四个结构化参数获取该场景下的 Skill：
+
+```bash
+coreinsight-cli skill scene-skills --first_scene "需求开发" --second_scene "MML开发" --dim_type "产品级" --dim_name "UPCF"
+```
+
+替换示例值：`--dim_name` 使用所选产品的 `offering_cn_name`，一级和二级场景必须来自该产品的场景列表。对每个相关产品和场景组合分别查询；产品无法确定时询问用户，不用仓库目录名猜测产品。
+
+`scene-skills` 的四个参数均必填，分别映射为 `{firstScene, secondScene, dimType, dimName}`，调用 `POST /experience/harness/scene/skills`。`scene-search` 已移除，不得再调用，也不要将产品和场景拼接成关键词替代场景查询。通用搜索仅用 `skill search --query`。
+
+`skill scenes` 和 `skill offering --repo` 依赖仓库 `origin`，没有 origin 时不要伪造；已知真实仓库 URL 时使用 `skill offering --http_url`。
 
 ### 核对候选
 

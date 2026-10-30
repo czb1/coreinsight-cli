@@ -26,8 +26,6 @@ func runSkill(rt *Runtime, args []string) error {
 		return runSkillSceneSkills(rt, args[1:])
 	case "search":
 		return runSkillSmart(rt, args[1:])
-	case "scene-search":
-		return runSkillSceneSearch(rt, args[1:])
 	case "download":
 		return runSkillDownload(rt, args[1:])
 	case "upload":
@@ -222,40 +220,6 @@ func runSkillSceneSkills(rt *Runtime, args []string) error {
 	return nil
 }
 
-func runSkillSceneSearch(rt *Runtime, args []string) error {
-	fs := newFS("skill scene-search")
-	var query, product, first, second, sortBy, sortOrder string
-	var page, pageSize int
-	fs.StringVar(&query, "query", "", "检索关键字，优先于产品/场景参数")
-	fs.StringVar(&product, "product", "", "产品名称")
-	fs.StringVar(&first, "first_scene", "", "一级场景")
-	fs.StringVar(&second, "second_scene", "", "二级场景")
-	fs.IntVar(&page, "page", 1, "页码")
-	fs.IntVar(&pageSize, "page_size", 6, "每页数量")
-	fs.StringVar(&sortBy, "sort_by", "downloads", "排序字段")
-	fs.StringVar(&sortOrder, "sort_order", "desc", "排序方向")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(query) == "" {
-		// Preserve legacy scene arguments as smart-search keywords.
-		var keywords []string
-		for _, value := range []string{product, first, second} {
-			if value = strings.TrimSpace(value); value != "" {
-				keywords = append(keywords, value)
-			}
-		}
-		query = strings.Join(keywords, " ")
-	}
-	return runSkillSmart(rt, []string{
-		"--query", query,
-		"--page", fmt.Sprint(page),
-		"--page_size", fmt.Sprint(pageSize),
-		"--sort_by", sortBy,
-		"--sort_order", sortOrder,
-	})
-}
-
 func runSkillSmart(rt *Runtime, args []string) error {
 	fs := newFS("skill search")
 	var query, sortBy, sortOrder string
@@ -421,11 +385,12 @@ func skillHelp() {
   coreinsight-cli skill product-scenes --dim_code <产品 offering_id>
   coreinsight-cli skill scene-skills --first_scene <一级场景> --second_scene <二级场景> --dim_type <维度类型> --dim_name <维度名称>
   coreinsight-cli skill search --query <关键字> [--page 1] [--page_size 6] [--sort_by downloads] [--sort_order desc]
-  coreinsight-cli skill scene-search --query <关键字> [--page 1] [--page_size 6] [--sort_by downloads] [--sort_order desc]
-  coreinsight-cli skill scene-search --product <产品> --first_scene <一级场景> --second_scene <二级场景>
   coreinsight-cli skill download --skill_id <id> [--version <version>] [--output ./skills]
   coreinsight-cli skill upload --file <skill.zip> [--business_dimension <维度>]
   coreinsight-cli skill verify --file <skill.zip> [--business_dimension <维度>]
+
+场景 Skill 查询使用 scene-skills，四个参数分别作为结构化字段发送到
+    POST /experience/harness/scene/skills；产品级场景使用 --dim_type "产品级"。
 
 注: skill offering 的产品列表请求不携带会话 Cookie，但仍需先执行
     coreinsight-cli auth login 通过本地登录校验（与 skill scenes 一致）。

@@ -88,11 +88,12 @@ func TestSkillSceneSkills(t *testing.T) {
 	defer srv.Close()
 	rt := &Runtime{ChatServer: srv.URL + "/chat", Timeout: 5 * time.Second, Session: &Session{Username: "tester", Cookie: "sid=test"}}
 
-	err := runSkillSceneSkills(rt, []string{
-		"--first_scene", "研发",
-		"--second_scene", "代码开发",
-		"--dim_type", "product",
-		"--dim_name", "测试产品",
+	err := runSkill(rt, []string{
+		"scene-skills",
+		"--first_scene", "需求开发",
+		"--second_scene", "MML开发",
+		"--dim_type", "产品级",
+		"--dim_name", "UPCF",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,10 +102,10 @@ func TestSkillSceneSkills(t *testing.T) {
 		t.Fatalf("request=%s %s cookie=%q decode=%v", method, path, cookie, decodeErr)
 	}
 	want := map[string]interface{}{
-		"firstScene":  "研发",
-		"secondScene": "代码开发",
-		"dimType":     "product",
-		"dimName":     "测试产品",
+		"firstScene":  "需求开发",
+		"secondScene": "MML开发",
+		"dimType":     "产品级",
+		"dimName":     "UPCF",
 	}
 	if !reflect.DeepEqual(body, want) {
 		t.Fatalf("body=%#v want=%#v", body, want)
@@ -120,5 +121,28 @@ func TestSkillSceneSkillsMissingRequired(t *testing.T) {
 		"--dim_type", "product",
 	}); err == nil {
 		t.Fatal("expected error when --dim_name missing")
+	}
+}
+
+func TestSkillSceneSearchRemoved(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("removed command sent a request: %s %s", r.Method, r.URL)
+		_, _ = w.Write([]byte(`{"code":200,"data":[]}`))
+	}))
+	defer srv.Close()
+	rt := &Runtime{ChatServer: srv.URL + "/chat", AICommunityServer: srv.URL, Timeout: 5 * time.Second}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"query", []string{"--query", "数据库"}},
+		{"scene", []string{"--product", "UPCF", "--first_scene", "需求开发", "--second_scene", "MML开发"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runSkill(rt, append([]string{"scene-search"}, tc.args...))
+			if err == nil || err.Error() != "未知 skill 子命令: scene-search" {
+				t.Fatalf("removed command should be rejected, got %v", err)
+			}
+		})
 	}
 }
