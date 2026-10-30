@@ -82,20 +82,18 @@ func (rt *Runtime) httpClient() *http.Client {
 	return &http.Client{Timeout: rt.Timeout, Transport: transport}
 }
 
-func (rt *Runtime) userID(override string) (string, error) {
-	return rt.identityID(override, "user_id")
-}
-
-func (rt *Runtime) identityID(override, flagName string) (string, error) {
-	if strings.TrimSpace(override) != "" {
-		return strings.TrimSpace(override), nil
+func (rt *Runtime) callerID(expected string) (string, error) {
+	if expired, _ := rt.Session.expired(); expired {
+		return "", fmt.Errorf("调用者身份需要有效登录会话，请执行 coreinsight-cli auth login --caller_id <工号>")
 	}
-	if rt.Session != nil {
-		if expired, _ := rt.Session.expired(); !expired && strings.TrimSpace(rt.Session.Username) != "" {
-			return strings.TrimSpace(rt.Session.Username), nil
-		}
+	id := rt.Session.callerID()
+	if id == "" {
+		return "", fmt.Errorf("当前会话未绑定调用者工号，请执行 coreinsight-cli auth login --caller_id <工号>；--user_id 仅用于检索过滤")
 	}
-	return "", fmt.Errorf("缺少用户工号：请先执行 coreinsight-cli auth login，或使用 --%s 指定", flagName)
+	if expected = strings.TrimSpace(expected); expected != "" && expected != id {
+		return "", fmt.Errorf("--caller_id 与登录会话不一致；业务命令不能覆盖调用者身份，请重新登录绑定目标工号")
+	}
+	return id, nil
 }
 
 // addSessionAuth 给业务请求注入鉴权凭证：

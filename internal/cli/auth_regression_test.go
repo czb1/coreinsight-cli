@@ -87,7 +87,7 @@ func TestInvalidLoginResponsesNeverSaveSession(t *testing.T) {
 			defer srv.Close()
 			rt := &Runtime{MarketServer: srv.URL, Timeout: time.Second}
 			output := captureAuthStdout(t, func() {
-				if err := runAuthLogin(rt, []string{"--no-browser"}); err == nil {
+				if err := runAuthLogin(rt, []string{"--caller_id", "employee001", "--no-browser"}); err == nil {
 					t.Error("login should fail without a valid token response")
 				}
 			})
@@ -140,7 +140,7 @@ func TestLoginUsesFreshAuthorizationAndDefaultBrowser(t *testing.T) {
 	t.Cleanup(func() { openBrowserFn = old })
 	rt := &Runtime{MarketServer: srv.URL, Timeout: time.Second}
 	for i := 0; i < 2; i++ {
-		if err := runAuthLogin(rt, nil); err != nil {
+		if err := runAuthLogin(rt, []string{"--caller_id", "employee001"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestLoginUsesFreshAuthorizationAndDefaultBrowser(t *testing.T) {
 func TestNoBrowserPendingDoesNotReuseOrOverwriteSavedSession(t *testing.T) {
 	isolatedHome(t)
 	fastAuthPolling(t)
-	previous := &Session{Token: "previous-token", SavedAt: "2026-01-01T00:00:00Z"}
+	previous := &Session{Token: "previous-token", CallerID: "previous-caller", SavedAt: "2026-01-01T00:00:00Z"}
 	if err := saveSession(previous); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestNoBrowserPendingDoesNotReuseOrOverwriteSavedSession(t *testing.T) {
 	openBrowserFn = func(string) error { t.Error("--no-browser must not launch"); return nil }
 	t.Cleanup(func() { openBrowserFn = old })
 	rt := &Runtime{MarketServer: srv.URL, Timeout: time.Second, Session: previous}
-	if err := runAuthLogin(rt, []string{"--no-browser"}); err == nil {
+	if err := runAuthLogin(rt, []string{"--caller_id", "employee001", "--no-browser"}); err == nil {
 		t.Fatal("old local credentials must not complete a new login")
 	}
 	after, _ := os.ReadFile(sessionFile())

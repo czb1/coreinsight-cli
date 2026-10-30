@@ -15,12 +15,29 @@ type Session struct {
 	// Token 是 devUC 浏览器授权登录拿到的凭证，业务请求通过 X-Auth-Token 头发送。
 	Token string `json:"token,omitempty"`
 	// Cookie 保留以兼容旧版账密登录产生的会话文件；新登录不再写入此字段。
-	Cookie    string `json:"cookie,omitempty"`
+	Cookie string `json:"cookie,omitempty"`
+	// CallerID is entered once for this login, independently of search filters.
+	CallerID  string `json:"caller_id,omitempty"`
 	Username  string `json:"username,omitempty"`
 	Server    string `json:"server,omitempty"`
 	Market    string `json:"market,omitempty"`
 	SavedAt   string `json:"saved_at"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+// callerID preserves the identity from legacy password/Cookie sessions only.
+// Token-only sessions from older releases must bind an identity on a new login.
+func (s *Session) callerID() string {
+	if s == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(s.CallerID); id != "" {
+		return id
+	}
+	if s.Token == "" && s.Cookie != "" {
+		return strings.TrimSpace(s.Username)
+	}
+	return ""
 }
 
 func sessionDir() (string, error) {

@@ -10,8 +10,8 @@ import (
 )
 
 func TestExperienceSearchIdentity(t *testing.T) {
-	valid := &Session{Username: " employee001 ", Cookie: "sid=test"}
-	expired := &Session{Username: "old-user", Cookie: "sid=old", ExpiresAt: time.Now().Add(-time.Hour).Format(time.RFC3339)}
+	valid := &Session{CallerID: " employee001 ", Token: "test-token"}
+	expired := &Session{CallerID: "old-user", Token: "old-token", ExpiresAt: time.Now().Add(-time.Hour).Format(time.RFC3339)}
 	for _, tc := range []struct {
 		name    string
 		session *Session
@@ -22,13 +22,18 @@ func TestExperienceSearchIdentity(t *testing.T) {
 	}{
 		{"logged in", valid, nil, "", "employee001", false},
 		{"target user", valid, []string{"--user_id", "target002"}, "target002", "employee001", false},
-		{"caller override", valid, []string{"--caller_id", " caller003 "}, "", "caller003", false},
-		{"both overrides", valid, []string{"--user_id", " target002 ", "--caller_id", "caller003"}, "target002", "caller003", false},
-		{"explicit without login", nil, []string{"--caller_id", "caller003"}, "", "caller003", false},
+		{"matching caller", valid, []string{"--caller_id", " employee001 "}, "", "employee001", false},
+		{"filter and matching caller", valid, []string{"--user_id", " target002 ", "--caller_id", "employee001"}, "target002", "employee001", false},
+		{"caller override rejected", valid, []string{"--caller_id", "caller003"}, "", "", true},
+		{"filter cannot override caller", valid, []string{"--user_id", "target002", "--caller_id", "caller003"}, "", "", true},
+		{"explicit without login", nil, []string{"--caller_id", "caller003"}, "", "", true},
 		{"no login", nil, nil, "", "", true},
 		{"target is not caller", nil, []string{"--user_id", "target002"}, "", "", true},
 		{"expired login", expired, nil, "", "", true},
 		{"missing username", &Session{Cookie: "sid=test"}, nil, "", "", true},
+		{"token without identity", &Session{Token: "test-token"}, nil, "", "", true},
+		{"token cannot inherit legacy name", &Session{Token: "test-token", Username: "old-user"}, nil, "", "", true},
+		{"legacy cookie identity", &Session{Cookie: "sid=test", Username: "legacy-user"}, nil, "", "legacy-user", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var body map[string]interface{}
@@ -79,20 +84,18 @@ func TestLoginIdentityPersistsAcrossRuntime(t *testing.T) {
 	}()
 
 	rt := &Runtime{AuthServer: srv.URL, MarketServer: srv.URL, Timeout: 5 * time.Second}
-	if err := runAuthLogin(rt, []string{}); err != nil {
+	if err := runAuthLogin(rt, []string{"--caller_id", " employee001 "}); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, err := defaultRuntime()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// devUC 浏览器登录不回传用户名，无显式 override 时 userID 应失败。
-	if _, err := reloaded.userID(""); err == nil {
-		t.Fatal("userID without override should fail (devUC login does not persist username)")
+	if got, err := reloaded.callerID(""); err != nil || got != "employee001" {
+		t.Fatalf("persisted caller=%q err=%v", got, err)
 	}
-	// 显式 override 仍可工作。
-	if got, err := reloaded.userID("other002"); err != nil || got != "other002" {
-		t.Fatalf("override=%q err=%v", got, err)
+	if _, err := reloaded.callerID("other002"); err == nil {
+		t.Fatal("business flags must not override the login identity")
 	}
 	// token 已持久化，业务鉴权用 X-Auth-Token。
 	if reloaded.Session == nil || reloaded.Session.Token != "persist-token" {
@@ -101,5 +104,75 @@ func TestLoginIdentityPersistsAcrossRuntime(t *testing.T) {
 	// 后端未返回有效期；客户端不猜测到期时间。
 	if reloaded.Session.ExpiresAt != "" {
 		t.Fatalf("ExpiresAt should be empty when not supplied, got %q", reloaded.Session.ExpiresAt)
+	}
+}
+
+func TestRAGUserFilterDoesNotChangeCaller(t *testing.T) {
+	for _, mode := range []string{"--qa", "--retrieve"} {
+		for _, filter := range []string{"", "target002"} {
+			t.Run(mode+"/"+filter, func(t *testing.T) {
+				var body map[string]interface{}
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if r.Header.Get("X-Auth-Token") != "test-token" {
+						t.Error("missing token")
+					}
+					_, _ = w.Write([]byte(`{"code":200,"data":[]}`))
+				}))
+				defer srv.Close()
+				rt := &Runtime{ChatServer: srv.URL, Timeout: time.Second, Session: &Session{Token: "test-token", CallerID: "employee001"}}
+				args := []string{mode, "--query", "test", "--products", "UPCF"}
+				if filter != "" {
+					args = append(args, "--user_id", filter)
+				}
+				if err := runRAG(rt, args); err != nil {
+					t.Fatal(err)
+				}
+				if body["user_id"] != filter || body["caller_id"] != "employee001" {
+					t.Fatalf("body=%v", body)
+				}
+			})
+		}
+	}
+}
+
+func TestLoginRequiresCallerBeforeAuthorization(t *testing.T) {
+	isolatedHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("must not authorize without caller_id") }))
+	defer srv.Close()
+	rt := &Runtime{MarketServer: srv.URL, Timeout: time.Second}
+	for _, args := range [][]string{nil, {"--caller_id", " "}} {
+		if err := runAuthLogin(rt, args); err == nil || !strings.Contains(err.Error(), "--caller_id") {
+			t.Fatalf("err=%v", err)
+		}
+	}
+	if s, err := loadSession(); err != nil || s != nil {
+		t.Fatalf("unexpected saved session: %v", err)
+	}
+}
+
+func TestLoginRebindsCallerOnlyAfterSuccess(t *testing.T) {
+	isolatedHome(t)
+	old := &Session{Token: "old-token", CallerID: "old-caller"}
+	if err := saveSession(old); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == devUCAuthorizePath {
+			_, _ = w.Write([]byte(`https://login.example.com/auth`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":200,"data":"new-token"}`))
+	}))
+	defer srv.Close()
+	rt := &Runtime{MarketServer: srv.URL, Timeout: time.Second, Session: old}
+	if err := runAuthLogin(rt, []string{"--caller_id", "new-caller", "--no-browser"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSession()
+	if err != nil || s == nil || s.Token != "new-token" || s.CallerID != "new-caller" {
+		t.Fatalf("new login binding not saved; error=%v", err)
 	}
 }
