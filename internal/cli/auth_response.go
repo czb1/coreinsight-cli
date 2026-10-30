@@ -55,23 +55,8 @@ func authResponseString(raw []byte) (string, error) {
 	case string:
 		return strings.TrimSpace(v), nil
 	case map[string]interface{}:
-		hasSuccess := false
-		if code, exists := v["code"]; exists {
-			switch code {
-			case float64(0), float64(200), "0", "200":
-				hasSuccess = true
-			default:
-				return "", fmt.Errorf("授权接口返回了非成功业务码")
-			}
-		}
-		if success, exists := v["success"]; exists {
-			if success != true {
-				return "", fmt.Errorf("授权接口未报告成功")
-			}
-			hasSuccess = true
-		}
-		if !hasSuccess {
-			return "", fmt.Errorf("授权接口 JSON 缺少明确的成功状态")
+		if err := checkAuthSuccess(v); err != nil {
+			return "", err
 		}
 		data, exists := v["data"]
 		if !exists {
@@ -87,6 +72,30 @@ func authResponseString(raw []byte) (string, error) {
 	default:
 		return "", fmt.Errorf("授权接口响应必须为字符串或成功 JSON 对象")
 	}
+}
+
+// Both login methods require an explicit success marker. Do not echo backend
+// messages: an error response can contain the password or session credentials.
+func checkAuthSuccess(payload map[string]interface{}) error {
+	hasSuccess := false
+	if code, exists := payload["code"]; exists {
+		switch code {
+		case float64(0), float64(200), "0", "200":
+			hasSuccess = true
+		default:
+			return fmt.Errorf("授权接口返回了非成功业务码")
+		}
+	}
+	if success, exists := payload["success"]; exists {
+		if success != true {
+			return fmt.Errorf("授权接口未报告成功")
+		}
+		hasSuccess = true
+	}
+	if !hasSuccess {
+		return fmt.Errorf("授权接口 JSON 缺少明确的成功状态")
+	}
+	return nil
 }
 
 // Bearer-token syntax; do not impose JWT structure on opaque devUC tokens.

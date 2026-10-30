@@ -115,6 +115,18 @@ func parseGlobals(rt *Runtime, args []string) ([]string, error) {
 			i++
 			return args[i], nil
 		}
+		// Login values may themselves look like global flags. Keep them literal.
+		if len(out) >= 2 && out[0] == "auth" && out[1] == "login" {
+			switch a {
+			case "--username", "-username", "-u", "--u", "--password", "-password", "-p", "--p", "--caller_id", "-caller_id", "--method", "-method":
+				v, e := take()
+				if e != nil {
+					return nil, e
+				}
+				out = append(out, a, v)
+				continue
+			}
+		}
 		switch a {
 		case "--server":
 			v, e := take()
@@ -225,7 +237,7 @@ func rootHelp() {
 全局参数:
   --server <url>              Core Insight 地址；对 auth 也作为登录 server 覆盖
   --chat-server <url>         Chat 地址，供问答和经验等接口使用（默认 <server>/chat）
-  --auth-server <url>         登录地址（默认 https://login.huawei.com/login1）
+  --auth-server <url>         账号密码登录地址（默认 https://omtool.rnd.huawei.com）
   --market-server <url>       市场服务地址（devUC 浏览器授权登录，默认 https://agent.huawei.com）
   --ai-community-server <url> AI Community 地址
   --core-harness-server <url> Core Harness 地址

@@ -14,9 +14,9 @@ const sessionFileName = "session.json"
 type Session struct {
 	// Token 是 devUC 浏览器授权登录拿到的凭证，业务请求通过 X-Auth-Token 头发送。
 	Token string `json:"token,omitempty"`
-	// Cookie 保留以兼容旧版账密登录产生的会话文件；新登录不再写入此字段。
+	// Cookie 是账号密码登录返回的凭证，也兼容旧版 Cookie 会话。
 	Cookie string `json:"cookie,omitempty"`
-	// CallerID is entered once for this login, independently of search filters.
+	// CallerID is bound at login (browser input or password username), never a search filter.
 	CallerID  string `json:"caller_id,omitempty"`
 	Username  string `json:"username,omitempty"`
 	Server    string `json:"server,omitempty"`
