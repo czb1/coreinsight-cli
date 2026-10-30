@@ -27,7 +27,7 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 	var page, pageSize int
 	fs.StringVar(&query, "query", "", "查询文本")
 	fs.StringVar(&searchField, "search_field", "title", "检索字段，可选 title / rag_search_text，默认 title")
-	fs.StringVar(&caller, "caller_id", "", "调用方工号（浏览器登录不保存工号，需显式指定）")
+	fs.StringVar(&caller, "caller_id", "", "可选：校验登录调用者工号，不能覆盖会话身份")
 	fs.StringVar(&scene, "scene", "ALL", "场景名称")
 	fs.StringVar(&source, "source", "web", "请求来源")
 	fs.StringVar(&userID, "user_id", "", "按贡献者工号过滤的经验，未指定则检索所有用户的经验")
@@ -44,7 +44,7 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 	if page <= 0 || pageSize <= 0 {
 		return fmt.Errorf("--page / --page_size 必须为正整数")
 	}
-	caller, err := rt.identityID(caller, "caller_id")
+	caller, err := rt.callerID(caller)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func runExperienceSearch(rt *Runtime, args []string) error {
 
 func runExperienceUpload(rt *Runtime, args []string) error {
 	fs := newFS("experience upload")
-	var scene, sceneID, title, summary, experience, docID, rag, productLine, pdu, productID, version, feature, userID string
+	var scene, sceneID, title, summary, experience, docID, rag, productLine, pdu, productID, version, feature, caller string
 	fs.StringVar(&scene, "scene", "", "场景名称")
 	fs.StringVar(&sceneID, "scene_id", "", "场景 ID")
 	fs.StringVar(&title, "title", "", "标题")
@@ -102,7 +102,7 @@ func runExperienceUpload(rt *Runtime, args []string) error {
 	fs.StringVar(&productID, "product_id", "", "产品 ID")
 	fs.StringVar(&version, "version_name", "", "版本")
 	fs.StringVar(&feature, "feature", "", "特性")
-	fs.StringVar(&userID, "user_id", "", "用户 ID（浏览器登录不保存工号，需显式指定）")
+	fs.StringVar(&caller, "caller_id", "", "可选：校验登录调用者工号，不能覆盖会话身份")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -111,10 +111,11 @@ func runExperienceUpload(rt *Runtime, args []string) error {
 			return err
 		}
 	}
-	uid, err := rt.userID(userID)
+	uid, err := rt.callerID(caller)
 	if err != nil {
 		return err
 	}
+	// Preserve the upload API's existing author field. CLI --user_id is reserved for search filters.
 	body := map[string]interface{}{"scene": scene, "scene_id": sceneID, "title": title, "summary": summary, "experience": experience, "user_id": uid}
 	if docID != "" {
 		body["doc_id"] = docID
@@ -173,13 +174,14 @@ func experienceHelp() {
   coreinsight-cli experience search --query <文本> [--search_field title|rag_search_text] [--user_id <工号>] [--caller_id <工号>] [--scene ALL] [--departments <部门,逗号分隔>] [--products <产品,逗号分隔>] [--page 1] [--page_size 5]
   coreinsight-cli experience upload --scene <场景> --scene_id <id> --title <标题> --summary <摘要> --experience <内容> [产品字段]
 
-（需先执行 coreinsight-cli auth login 建立会话）
+（需先执行 coreinsight-cli auth login --caller_id <工号> 建立会话）
 
-检索时 caller_id 需使用 --caller_id 显式指定（浏览器登录不保存工号）；user_id 指定时仅检索该贡献者的经验，未指定则检索所有用户的经验。
+检索时 caller_id 自动取登录会话；--caller_id 仅校验一致性，不能覆盖身份。
+--user_id 指定时仅检索该贡献者的经验，未指定则检索所有用户的经验，不自动填登录工号。
 --search_field 指定检索字段，默认 title（按标题检索），可指定 rag_search_text（按补充检索文本检索）。
 --departments 按部门过滤（后端映射 product.pdu_name），--products 按产品名称过滤（映射 product.product_name），
 两者可同时叠加过滤，多个值使用逗号分隔。
-上传的 user_id 需使用 --user_id 显式指定（浏览器登录不保存工号）。显式 ID 参数优先。
+上传作者自动取会话 caller_id，并映射到后端既有 user_id 字段；上传不接受 --user_id。
 `)
 }
 

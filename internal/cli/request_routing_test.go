@@ -20,9 +20,9 @@ func TestReportedQARoutes(t *testing.T) {
 		body    map[string]interface{}
 		wantErr bool
 	}{
-		{"kb", []string{"--qa", "--kb_sns", "123,456"}, "/chat/app/support/app/chat", map[string]interface{}{"user_id": "tester", "content": "问题", "stream_flag": false, "kb_sns": []interface{}{"123", "456"}}, false},
-		{"products", []string{"--retrieve", "--products", "UPCF,UDG"}, "/chat/app/support/app/retrieve", map[string]interface{}{"user_id": "tester", "question": "问题", "products": []interface{}{"UPCF", "UDG"}}, false},
-		{"department", []string{"--qa", "--departments", "分组核心网产品部", "--prompt_template", "SDD"}, "/chat/app/support/app/chat", map[string]interface{}{"user_id": "tester", "content": "问题", "stream_flag": false, "departments": []interface{}{"分组核心网产品部"}, "prompt_template": "SDD"}, false},
+		{"kb", []string{"--qa", "--kb_sns", "123,456"}, "/chat/app/support/app/chat", map[string]interface{}{"user_id": "", "caller_id": "tester", "content": "问题", "stream_flag": false, "kb_sns": []interface{}{"123", "456"}}, false},
+		{"products", []string{"--retrieve", "--products", "UPCF,UDG"}, "/chat/app/support/app/retrieve", map[string]interface{}{"user_id": "", "caller_id": "tester", "question": "问题", "products": []interface{}{"UPCF", "UDG"}}, false},
+		{"department", []string{"--qa", "--departments", "分组核心网产品部", "--prompt_template", "SDD"}, "/chat/app/support/app/chat", map[string]interface{}{"user_id": "", "caller_id": "tester", "content": "问题", "stream_flag": false, "departments": []interface{}{"分组核心网产品部"}, "prompt_template": "SDD"}, false},
 		{"missing-mode", []string{"--kb_sns", "123,456"}, "", nil, true},
 		{"both-modes", []string{"--qa", "--retrieve", "--kb_sns", "123"}, "", nil, true},
 	} {
@@ -94,11 +94,47 @@ func TestExperienceSearchFilters(t *testing.T) {
 		wantErr bool
 	}{
 		{"no-filter", []string{}, base, false},
-		{"search-field-rag", []string{"--search_field", "rag_search_text"}, func() map[string]interface{} { m := map[string]interface{}{}; for k, v := range base { m[k] = v }; m["search_field"] = "rag_search_text"; return m }(), false},
-		{"departments-multi", []string{"--departments", "云核心网维护部,网络产品部"}, func() map[string]interface{} { m := map[string]interface{}{}; for k, v := range base { m[k] = v }; m["dept"] = []interface{}{"云核心网维护部", "网络产品部"}; return m }(), false},
-		{"products-single", []string{"--products", "UPCF"}, func() map[string]interface{} { m := map[string]interface{}{}; for k, v := range base { m[k] = v }; m["products"] = "UPCF"; return m }(), false},
-		{"products-multi", []string{"--products", "UPCF,UDG"}, func() map[string]interface{} { m := map[string]interface{}{}; for k, v := range base { m[k] = v }; m["products"] = []interface{}{"UPCF", "UDG"}; return m }(), false},
-		{"both-combined", []string{"--departments", "X", "--products", "Y"}, func() map[string]interface{} { m := map[string]interface{}{}; for k, v := range base { m[k] = v }; m["dept"] = "X"; m["products"] = "Y"; return m }(), false},
+		{"search-field-rag", []string{"--search_field", "rag_search_text"}, func() map[string]interface{} {
+			m := map[string]interface{}{}
+			for k, v := range base {
+				m[k] = v
+			}
+			m["search_field"] = "rag_search_text"
+			return m
+		}(), false},
+		{"departments-multi", []string{"--departments", "云核心网维护部,网络产品部"}, func() map[string]interface{} {
+			m := map[string]interface{}{}
+			for k, v := range base {
+				m[k] = v
+			}
+			m["dept"] = []interface{}{"云核心网维护部", "网络产品部"}
+			return m
+		}(), false},
+		{"products-single", []string{"--products", "UPCF"}, func() map[string]interface{} {
+			m := map[string]interface{}{}
+			for k, v := range base {
+				m[k] = v
+			}
+			m["products"] = "UPCF"
+			return m
+		}(), false},
+		{"products-multi", []string{"--products", "UPCF,UDG"}, func() map[string]interface{} {
+			m := map[string]interface{}{}
+			for k, v := range base {
+				m[k] = v
+			}
+			m["products"] = []interface{}{"UPCF", "UDG"}
+			return m
+		}(), false},
+		{"both-combined", []string{"--departments", "X", "--products", "Y"}, func() map[string]interface{} {
+			m := map[string]interface{}{}
+			for k, v := range base {
+				m[k] = v
+			}
+			m["dept"] = "X"
+			m["products"] = "Y"
+			return m
+		}(), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var method, path, cookie string

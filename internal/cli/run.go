@@ -62,7 +62,7 @@ func Run(args []string) int {
 		}
 		runErr = runExperience(rt, args[1:])
 	case "version":
-		success(requestID(), map[string]interface{}{"name": "coreinsight-cli", "version": "0.1.0"})
+		success(requestID(), currentBuildVersion())
 		return 0
 	default:
 		runErr = fmt.Errorf("未知命令: %s", args[0])
@@ -87,7 +87,7 @@ func requireAuthenticated(rt *Runtime, command string) error {
 		failure(requestID(), codeUnauthenticated, "Not Authenticated", map[string]interface{}{
 			"authenticated": false, "reason": "no_session", "command": command,
 			"session_file": sessionFile(),
-			"hint":         "请执行: coreinsight-cli auth login（浏览器授权登录）",
+			"hint":         "请执行: coreinsight-cli auth login --caller_id <工号>（浏览器授权登录）",
 		})
 		return errUnauthenticated
 	}
@@ -96,7 +96,7 @@ func requireAuthenticated(rt *Runtime, command string) error {
 			"authenticated": false, "reason": reason, "command": command,
 			"username": rt.Session.Username, "saved_at": rt.Session.SavedAt,
 			"expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(),
-			"hint": "本地会话无效或已过期，请重新执行: coreinsight-cli auth login（浏览器授权登录）",
+			"hint": "本地会话无效或已过期，请重新执行: coreinsight-cli auth login --caller_id <工号>（浏览器授权登录）",
 		})
 		return errUnauthenticated
 	}

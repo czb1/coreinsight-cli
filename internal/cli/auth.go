@@ -35,6 +35,7 @@ var errUnauthenticated = errors.New("unauthenticated")
 var errAuthorizationTimeout = errors.New("授权超时：未在时限内收到本次浏览器授权的 token")
 
 type loginOpts struct {
+	callerID    string
 	noBrowser   bool
 	timeoutSecs int
 }
@@ -63,6 +64,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 	}
 	var o loginOpts
 	fs := newFS("auth login")
+	fs.StringVar(&o.callerID, "caller_id", "", "本次登录绑定的调用者工号，后续业务命令自动携带")
 	fs.BoolVar(&o.noBrowser, "no-browser", false, "不自动打开浏览器，仅打印授权链接供手动复制")
 	fs.IntVar(&o.timeoutSecs, "timeout", pollMaxRetry, "授权轮询超时秒数（默认 60）")
 	if err := fs.Parse(args); err != nil {
@@ -73,6 +75,10 @@ func runAuthLogin(rt *Runtime, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("auth login 不接受位置参数")
+	}
+	o.callerID = strings.TrimSpace(o.callerID)
+	if err := required("caller_id", o.callerID); err != nil {
+		return fmt.Errorf("登录时需输入一次调用者工号：coreinsight-cli auth login --caller_id <工号>；后续调用自动读取会话")
 	}
 
 	id := requestID()
@@ -118,10 +124,11 @@ func runAuthLogin(rt *Runtime, args []string) error {
 
 	// 4. 后端未提供有效期；不据此推断 token 永久有效。
 	sess := &Session{
-		Token:   token,
-		Server:  rt.AuthServer,
-		Market:  market,
-		SavedAt: time.Now().Format(time.RFC3339),
+		Token:    token,
+		CallerID: o.callerID,
+		Server:   rt.AuthServer,
+		Market:   market,
+		SavedAt:  time.Now().Format(time.RFC3339),
 	}
 	if err := saveSession(sess); err != nil {
 		failure(id, codeInternalError, "Session Save Failed", err.Error())
@@ -134,6 +141,9 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		"credential_state":           "stored",
 		"server_verified":            false,
 		"source":                     "devuc_token_response",
+		"caller_id":                  sess.callerID(),
+		"caller_id_bound":            true,
+		"caller_id_source":           "login_input",
 		"browser_open_requested":     !o.noBrowser,
 		"browser_launcher_succeeded": browserLaunched,
 		"hint":                       "已获取并保存本次授权返回的凭证；尚未验证业务接口。saved_at 是本地保存时间，不是用户点击授权的时间。",
@@ -269,11 +279,11 @@ func runAuthStatus(rt *Runtime, args []string) error {
 	}
 	id := requestID()
 	if rt.Session == nil {
-		failure(id, codeUnauthenticated, "Not Authenticated", map[string]interface{}{"authenticated": false, "reason": "no_session", "session_file": sessionFile(), "hint": "请执行: coreinsight-cli auth login（浏览器授权登录）"})
+		failure(id, codeUnauthenticated, "Not Authenticated", map[string]interface{}{"authenticated": false, "reason": "no_session", "session_file": sessionFile(), "hint": "请执行: coreinsight-cli auth login --caller_id <工号>（浏览器授权登录）"})
 		return errUnauthenticated
 	}
 	if expired, reason := rt.Session.expired(); expired {
-		failure(id, codeUnauthenticated, "Session Invalid", map[string]interface{}{"authenticated": false, "reason": reason, "username": rt.Session.Username, "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(), "hint": "本地会话无效或已过期，请重新执行: coreinsight-cli auth login（浏览器授权登录）"})
+		failure(id, codeUnauthenticated, "Session Invalid", map[string]interface{}{"authenticated": false, "reason": reason, "username": rt.Session.Username, "saved_at": rt.Session.SavedAt, "expires_at": nullable(rt.Session.ExpiresAt), "session_file": sessionFile(), "hint": "本地会话无效或已过期，请重新执行: coreinsight-cli auth login --caller_id <工号>（浏览器授权登录）"})
 		return errUnauthenticated
 	}
 	success(id, map[string]interface{}{
@@ -283,6 +293,8 @@ func runAuthStatus(rt *Runtime, args []string) error {
 		"hint":             "仅检查本地凭证；尚未验证服务端授权。saved_at 是本地保存时间，不是浏览器授权时间。",
 		"source":           "session_file",
 		"username":         nullable(rt.Session.Username),
+		"caller_id":        nullable(rt.Session.callerID()),
+		"caller_id_bound":  rt.Session.callerID() != "",
 		"server":           rt.AuthServer,
 		"market":           nullable(rt.Session.Market),
 		"token":            maskedToken(rt.Session.Token),
@@ -316,21 +328,22 @@ func maskedToken(token string) string {
 }
 
 func authHelp() {
-	plainHelp("用法:\n  coreinsight-cli auth login [登录参数]\n  coreinsight-cli auth status\n  coreinsight-cli auth logout\n")
+	plainHelp("用法:\n  coreinsight-cli auth login --caller_id <工号> [登录参数]\n  coreinsight-cli auth status\n  coreinsight-cli auth logout\n")
 }
 func authLoginHelp() {
 	plainHelp(`用法:
-  coreinsight-cli auth login
-  coreinsight-cli auth login --no-browser
-  coreinsight-cli auth login --timeout 120
+  coreinsight-cli auth login --caller_id <工号>
+  coreinsight-cli auth login --caller_id <工号> --no-browser
+  coreinsight-cli auth login --caller_id <工号> --timeout 120
 
 浏览器授权登录（复用 agentcenter devUC 流程）:
   1. 每次生成新的随机授权标识，向市场服务请求授权页 URL
   2. 自动打开默认浏览器（--no-browser 则仅打印链接供手动复制）
   3. 用户在浏览器完成授权，CLI 轮询后端获取 token
-  4. 校验成功响应后保存 token，业务请求通过 X-Auth-Token 头发送
+  4. 校验成功响应后，将 token 和本次输入的 caller_id 一起保存到会话
 
 参数:
+  --caller_id <工号>  本次登录绑定的调用者工号（必填，后续业务命令自动读取）
   --no-browser        不自动打开浏览器，仅打印授权链接
   --timeout <seconds> 授权轮询超时秒数（默认 60）
   --market-server <url> 覆盖市场服务地址（默认 https://agent.huawei.com，可用环境变量 COREINSIGHT_MARKET_SERVER）
@@ -338,8 +351,10 @@ func authLoginHelp() {
 注: --no-browser 仅关闭自动打开，仍需完成本次授权。已有浏览器 SSO
     可能自动完成授权。后端未返回有效期不代表 token 永久有效。
     auth status 只检查本地凭证，不验证服务端。logout 只清除本地凭证。
+    caller_id 由本次登录时输入，并非服务端返回的已验证身份；请填写当前 SSO 账号的工号。
+    user_id 是检索过滤字段，不作为登录身份；业务命令不能覆盖会话 caller_id。
 `)
 }
 func authStatusHelp() {
-	plainHelp("用法:\n  coreinsight-cli auth status\n\n退出码: 0=本地存在格式有效且未标记过期的凭证，3=本地凭证缺失/无效/过期。\n不会请求服务端验证；server_verified 固定为 false。\n")
+	plainHelp("用法:\n  coreinsight-cli auth status\n\n退出码: 0=本地存在格式有效且未标记过期的凭证，3=本地凭证缺失/无效/过期。\n不会请求服务端验证；server_verified 固定为 false。\ncaller_id_bound=false 表示旧会话未绑定工号；执行需要调用者身份的任务前，请 auth login --caller_id <工号>。\n")
 }

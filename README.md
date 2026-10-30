@@ -10,19 +10,21 @@ go build -o coreinsight-cli ./cmd/coreinsight-cli
 
 Windows 使用 `go build -o coreinsight-cli.exe ./cmd/coreinsight-cli`。更新源码后需重新构建并替换实际使用的可执行文件，同时更新 Agent 加载的 `SKILL.md`。
 
+`coreinsight-cli version` 不硬编码发布版本：优先使用发布流水线通过 `-ldflags "-X coreinsight-cli/internal/cli.Version=<实际发布版本>"` 注入的值，其次使用 Go 模块版本；源码构建使用 `dev+<Git 提交前 12 位>`，有未提交变更时追加 `.dirty`。没有构建元数据时只显示 `dev`，不冒充已发布版本。输出同时包含可用的 `commit`、`commit_time`、`modified` 和 `go_version`。流水线还可注入 `coreinsight-cli/internal/cli.Commit` 和 `coreinsight-cli/internal/cli.BuildTime`；提交时间与构建时间分开报告。
+
 ## 1. 登录
 
-默认尝试打开浏览器完成 devUC 授权，无需在命令行输入账号密码。每次显式执行 `auth login` 都创建新的授权事务，业务请求使用保存的 token 通过 `X-Auth-Token` 头鉴权。客户端没有服务端有效期信息，不将其解释为“永久有效”。
+登录时用 `--caller_id` 输入一次当前 SSO 账号的工号，CLI 默认尝试打开浏览器完成 devUC 授权，无需在命令行输入密码。每次显式执行 `auth login` 都创建新的授权事务，业务请求使用保存的 token 通过 `X-Auth-Token` 头鉴权。客户端没有服务端有效期信息，不将其解释为“永久有效”。
 
 ```bash
 # 默认：自动打开浏览器完成授权
-coreinsight-cli auth login
+coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>"
 
 # 用户明确要求手动打开，或已确认无桌面环境时：打印链接，继续等待本次授权
-coreinsight-cli auth login --no-browser
+coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>" --no-browser
 
 # 自定义授权轮询超时秒数（默认 60）
-coreinsight-cli auth login --timeout 120
+coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>" --timeout 120
 
 # 仅检查本地凭证，不请求服务端验证
 coreinsight-cli auth status
@@ -37,9 +39,9 @@ coreinsight-cli auth logout
 2. 校验授权 URL 后，尝试打开默认浏览器，并向 stderr 打印链接。Windows 使用 `powershell Start-Process`；CLI 等待启动命令退出并报告错误。启动命令成功不保证窗口可见，也不证明用户已确认。不能仅因命令由 Agent/Bash 子进程执行就默认加 `--no-browser`。
 3. 用本次相同的 `fromSource` 轮询 `GET <market>/mcpService/external/v1/auth/devUC/token?fromSource=<key>`。已有浏览器 SSO 可能自动完成授权，不一定再次要求输入密码或点击确认。`--no-browser` 仅关闭自动打开，不跳过授权；应在命令等待期间手动打开本次链接。
 4. 严格检查 HTTP 状态、响应类型及 JSON 业务成功状态。空响应、JSON `null`、成功响应中的空 `data` / `data: null` 继续等待；HTTP/业务错误、HTML、对象/数字类型 token、无效 token 格式均不会保存。保留纯字符串 token 格式兼容，不把错误 JSON 整体转成 token。
-5. 只在收到格式有效的 token 后保存到 `~/.coreinsight-cli/session.json`（请求创建目录 0700、文件 0600；实际权限遵循操作系统）。授权失败保留已有会话，不能据旧会话的 `auth status` 把这次失败说成成功。
+5. 只在收到格式有效的 token 后，将 token 与本次输入的 `caller_id` 一起保存到 `~/.coreinsight-cli/session.json`（请求创建目录 0700、文件 0600；实际权限遵循操作系统）。授权失败保留已有会话，不能据旧会话的 `auth status` 把这次失败说成成功。
 
-devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场地址（默认 `https://agent.huawei.com`）。`auth login --timeout 120` 设置 token 轮询总时限；放在命令之前的 `--timeout` 设置单次 HTTP 请求超时，例如 `coreinsight-cli --timeout 15 auth login --timeout 120`。
+devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场地址（默认 `https://agent.huawei.com`）。`auth login --caller_id <工号> --timeout 120` 设置 token 轮询总时限；放在命令之前的 `--timeout` 设置单次 HTTP 请求超时，例如 `coreinsight-cli --timeout 15 auth login --caller_id "<工号>" --timeout 120`。
 
 认证输出说明：
 
@@ -51,7 +53,17 @@ devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 
 | `saved_at` | 本地写入凭证的时间，不是浏览器授权时间 |
 | `auth status` 退出码 `0` / `3` | 本地凭证通过检查 / 缺失、格式无效或过期；不请求服务端 |
 
-升级后，旧版本误存的 `<nil>`、错误 JSON 等明显无效凭证会被本地检查拦截。用户要求重新登录时直接执行 `auth login`；正常执行已授权的业务任务时可以复用现有本地凭证。服务端仍可撤销或拒绝凭证，以业务请求的实际响应为准。
+调用者与过滤字段分开处理：
+
+| 字段 | 来源与用途 |
+| --- | --- |
+| 会话 `caller_id` | 登录时输入一次并与本次 token 共同保存；后续调用自动读取。它是用户填写的工号，当前 devUC 接口不提供服务端身份核验，应填写当前 SSO 账号对应工号 |
+| 检索 `--user_id` | 可选过滤条件；不传则不按用户过滤，绝不自动填登录工号 |
+| 业务命令 `--caller_id` | 可选的一致性校验参数；只有与会话相同才允许执行，不能覆盖调用者身份 |
+
+`auth status` 输出 `caller_id` 和 `caller_id_bound`。旧版只有 token 的会话会显示 `caller_id_bound: false`；执行需要调用者身份的任务前，重新登录绑定工号。旧 Cookie 会话可继续读取已保存的 `username` 作为调用者。新登录不沿用上一次会话的工号；授权失败时保留原 token 和原工号。
+
+升级后，旧版本误存的 `<nil>`、错误 JSON 等明显无效凭证会被本地检查拦截。用户要求重新登录时执行 `auth login --caller_id <工号>`；正常执行已授权的业务任务时可以复用现有本地凭证。服务端仍可撤销或拒绝凭证，以业务请求的实际响应为准。
 
 > **登录前置要求**：`rag`、`skill`、`experience` 的所有业务命令都必须通过本地会话检查。会话缺失、无效或过期时，命令在发出网络请求前返回 JSON-RPC 错误 `-32002`，退出码 `3`。`auth`、`version` 及所有 `--help` 帮助输出不受影响。
 
@@ -59,13 +71,12 @@ devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 
 
 `rag` 命令同时提供问答模式和纯检索模式，通过互斥开关 `--qa` / `--retrieve` 区分，两者必须指定其一且不能同时指定：`--qa` 走问答接口，`--retrieve` 走纯检索接口。旧命令 `qa`、`retrieve` 已合并移除。
 
-四个路由参数 `--kb_sns`、`--products`、`--departments`、`--scenes` 必须且只能选择一个；多个值用逗号分隔。`user_id` 需使用 `--user_id` 显式指定（浏览器登录不保存工号）。
+四个路由参数 `--kb_sns`、`--products`、`--departments`、`--scenes` 必须且只能选择一个；多个值用逗号分隔。`caller_id` 自动取登录会话；`--user_id` 是可选的检索过滤字段，未指定时请求中的 `user_id` 为空，不按用户过滤。
 
 ```bash
 # 问答模式
 coreinsight-cli rag \
   --qa \
-  --user_id "<实际工号>" \
   --query "问题" \
   --kb_sns 123,456 \
   --prompt_template SDD
@@ -73,7 +84,6 @@ coreinsight-cli rag \
 # 纯检索模式
 coreinsight-cli rag \
   --retrieve \
-  --user_id "<实际工号>" \
   --query "问题" \
   --products UPCF,UDG
 ```
@@ -105,13 +115,11 @@ coreinsight-cli skill search \
   --sort_order desc
 
 coreinsight-cli skill download \
-  --user_id "<实际工号>" \
   --skill_id "bca61fb0-3734-49c0-906e-0209d17032fd" \
-  --version "0.0.1" \
   --output ./skills
 
-coreinsight-cli skill upload --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
-coreinsight-cli skill verify --user_id "<实际工号>" --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill upload --file ./skill.zip --business_dimension "产品级"
+coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 ```
 
 `skill scenes --repo` 的参数必须是本地 Git 仓库目录（例如 `.` 或 `D:\projects\uscdb`），不能传远程 URL；只有 URL 时使用上面的 `offering --http_url` 和 `product-scenes` 两步查询。`skill scenes` 会读取 `git remote get-url origin`，把 SSH/SCP 地址规范化成 HTTP(S)，分页查询产品，再通过 Chat 服务的 `POST /experience/harness/scenes` 查询场景。默认完整 URL 为 `https://coreinsight.rnd.huawei.com/chat/experience/harness/scenes`。产品接口固定使用 `pageSize=20`；`offering_cn_name` 原样作为产品名使用，不做 trim。
@@ -126,41 +134,43 @@ coreinsight-cli skill verify --user_id "<实际工号>" --file ./skill.zip --bus
 
 `skill search` 用于通用关键词检索，调用 AI Community 的 `GET /aiapp-v2/api/skills`，固定 `searchMode=smart`，并发送 `pageNum`、`pageSize`、`sortBy`、`sortOrder`、`keyword`。默认完整 URL 为 `https://aicommunity.coreai.rnd.huawei.com/aiapp-v2/api/skills`。需要查询指定产品和场景下的 Skill 时使用 `skill scene-skills`。
 
+`skill download` 的 `--version` 可选：需要固定版本时使用真实检索结果中的版本，不传时交由服务端选择，CLI 不补固定版本或 `latest`；输出 `version: null` 表示没有显式指定，不代表已经查明服务端最终选择的版本。
+
+Skill 下载/上传/校验自动从会话读取 `caller_id`，并映射为市场接口既有的 `userId` 参数；这些命令不接受 `--user_id`。
+
 `skill download` 先从 AI Community 获取下载 URL，再使用普通 GET 下载 ZIP。现有接口材料没有定义这个动态下载 URL 的额外 Header/鉴权要求，因此 CLI 不向该 URL 转发 Core Insight Cookie。
 
 ## 4. 经验
 
 ```bash
 coreinsight-cli experience search \
-  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --page 1 \
   --page_size 5 \
   --scene ALL
 
+# 仅按指定贡献者过滤，调用者仍取当前登录会话
+coreinsight-cli experience search --query "智能客服系统" --user_id "<目标贡献者工号>"
+
 # 指定检索字段为 rag_search_text（默认 title，按标题检索）
 coreinsight-cli experience search \
-  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --search_field rag_search_text \
   --scene ALL
 
 # 按部门过滤（后端映射 product.pdu_name，多个用逗号分隔）
 coreinsight-cli experience search \
-  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --departments "云核心网维护部,网络产品部" \
   --scene ALL
 
 # 按产品名称过滤（后端映射 product.product_name，多个用逗号分隔）
 coreinsight-cli experience search \
-  --caller_id "<实际调用方工号>" \
   --query "智能客服系统" \
   --products "UPCF,UDG" \
   --scene ALL
 
 coreinsight-cli experience upload \
-  --user_id "<实际工号>" \
   --scene "test" \
   --scene_id "scene-001" \
   --title "在U2020上执行MML命令" \
@@ -169,19 +179,19 @@ coreinsight-cli experience upload \
   --rag_search_text "MML命令 U2020 执行"
 ```
 
-经验上传的核心请求字段为 `user_id`、`title`、`summary`、`scene_id`、`scene`、`experience`、`rag_search_text`。`user_id` 需使用 `--user_id` 显式指定（浏览器登录不保存工号，无法默认推导）。成功响应中的 `data` 为经验 ID 字符串，CLI 会原样保留在 JSON-RPC 的 `result` 中，不要求版本信息对象。旧的 `--doc_id` 和产品字段参数保留透传兼容；新接口是否支持这些扩展字段、是否有覆盖语义，需以后端契约为准。
+经验上传的核心请求字段为 `user_id`、`title`、`summary`、`scene_id`、`scene`、`experience`、`rag_search_text`。该写入接口的既有 `user_id` 字段表示作者，由 CLI 将会话 `caller_id` 内部映射填入；上传命令不再接受 `--user_id` 覆盖作者。检索命令的 `--user_id` 仍只表示过滤条件。成功响应中的 `data` 为经验 ID 字符串，CLI 会原样保留在 JSON-RPC 的 `result` 中，不要求版本信息对象。旧的 `--doc_id` 和产品字段参数保留透传兼容；新接口是否支持这些扩展字段、是否有覆盖语义，需以后端契约为准。
 
 ```json
 {"code":200,"msg":"success","data":"3659f967-a733-4045-9b09-c3ba2ad8d9a1"}
 ```
 
+经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`page`、`page_size`、`source`、`title`、`search_field`、`scene`，以及可选过滤字段 `dept`、`products`。其中 `title` 取 `--query`（查询文本），`search_field` 取 `--search_field`（检索字段，默认 `title`，可指定 `rag_search_text` 按补充检索文本检索），`caller_id` 为调用方工号（自动取登录会话，业务参数只能校验一致性，不能覆盖），`user_id` 为按贡献者过滤的经验（仅使用显式传入的值，未指定则为空，表示检索所有用户的经验）。`--user_id` 用于过滤目标贡献者的经验，不会改变调用方工号。不指定 `--search_field` 时默认按 `title` 检索。
+
+`--departments` 映射请求体 `dept`（后端转发为 `product.pdu_name` 过滤），`--products` 映射请求体 `products`（后端转发为 `product.product_name` 过滤）；两者均支持逗号分隔的多个值，且**可同时指定叠加过滤**（dept 与产品同时命中才返回）。两者都是可选过滤条件，未指定时按现有逻辑检索全部经验。
+
 ## 5. OKF 知识中心
 
 当前材料只给出了“知识配置”标题，没有提供对应 Endpoint、Method、请求体或响应契约，因此本版本没有臆造 OKF 命令。补充 API 契约后可以按相同模式继续扩展。
-
-经验检索调用 `POST /chat/experience/search`，请求体使用 `user_id`、`caller_id`、`page`、`page_size`、`source`、`title`、`search_field`、`scene`，以及可选过滤字段 `dept`、`products`。其中 `title` 取 `--query`（查询文本），`search_field` 取 `--search_field`（检索字段，默认 `title`，可指定 `rag_search_text` 按补充检索文本检索），`caller_id` 为调用方工号（需使用 `--caller_id` 显式指定，浏览器登录不保存工号），`user_id` 为按贡献者过滤的经验（仅使用显式传入的值，未指定则为空，表示检索所有用户的经验）。`--user_id` 用于过滤目标贡献者的经验，不会改变调用方工号。不指定 `--search_field` 时默认按 `title` 检索。
-
-`--departments` 映射请求体 `dept`（后端转发为 `product.pdu_name` 过滤），`--products` 映射请求体 `products`（后端转发为 `product.product_name` 过滤）；两者均支持逗号分隔的多个值，且**可同时指定叠加过滤**（dept 与产品同时命中才返回）。两者都是可选过滤条件，未指定时按现有逻辑检索全部经验。
 
 所有 HTTP/HTTPS 请求均使用统一客户端，并按当前内部环境要求关闭 TLS 证书校验。
 
@@ -208,11 +218,10 @@ coreinsight-cli --server https://example.internal --timeout 300 rag --qa ...
 ```bash
 # 下面地址是占位示例，必须替换成后端确认的真实服务基址
 coreinsight-cli --chat-server https://coreinsight.rnd.huawei.com/chat experience upload \
-  --user_id "<实际工号>" \
   --scene test --scene_id scene-001 --title 标题 --summary 摘要 --experience 内容
 
 coreinsight-cli --chat-server https://chat.example.internal/chat --debug rag \
-  --qa --user_id "<实际工号>" --query "问题" --kb_sns 123
+  --qa --query "问题" --kb_sns 123
 ```
 
 - `--chat-server` 指向 Chat 基址（默认 `<COREINSIGHT_SERVER>/chat`），CLI 会追加 `/app/support/app/chat` 或 `/app/support/app/retrieve`。环境变量末尾的斜杠会先移除，避免生成 `//chat`。

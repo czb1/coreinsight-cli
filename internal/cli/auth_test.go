@@ -166,7 +166,7 @@ func TestRunAuthLoginEndToEnd(t *testing.T) {
 		openBrowserFn = oldBrowser
 	}()
 
-	if got := Run([]string{"--market-server", srv.URL, "auth", "login"}); got != 0 {
+	if got := Run([]string{"--market-server", srv.URL, "auth", "login", "--caller_id", "employee001"}); got != 0 {
 		t.Fatalf("Run(auth login) = %d, want 0", got)
 	}
 	if atomic.LoadInt32(&authorizeCalled) == 0 || atomic.LoadInt32(&tokenCalled) == 0 {
@@ -202,7 +202,7 @@ func TestRunAuthLoginNoBrowser(t *testing.T) {
 		openBrowserFn = oldBrowser
 	}()
 
-	if got := Run([]string{"--market-server", srv.URL, "auth", "login", "--no-browser"}); got != 0 {
+	if got := Run([]string{"--market-server", srv.URL, "auth", "login", "--caller_id", "employee001", "--no-browser"}); got != 0 {
 		t.Fatalf("Run = %d", got)
 	}
 	if browserOpened {

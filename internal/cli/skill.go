@@ -258,18 +258,18 @@ func runSkillSmart(rt *Runtime, args []string) error {
 
 func runSkillDownload(rt *Runtime, args []string) error {
 	fs := newFS("skill download")
-	var skillID, version, output, userID string
+	var skillID, version, output, caller string
 	fs.StringVar(&skillID, "skill_id", "", "Skill ID")
 	fs.StringVar(&version, "version", "", "Skill 版本")
 	fs.StringVar(&output, "output", "./skills", "下载目录")
-	fs.StringVar(&userID, "user_id", "", "用户 ID（浏览器登录不保存工号，需显式指定）")
+	fs.StringVar(&caller, "caller_id", "", "可选：校验登录调用者工号，不能覆盖会话身份")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := required("skill_id", skillID); err != nil {
 		return err
 	}
-	uid, err := rt.userID(userID)
+	uid, err := rt.callerID(caller)
 	if err != nil {
 		return err
 	}
@@ -343,17 +343,17 @@ func downloadFileName(rawURL string, resp *http.Response, skillID, version strin
 
 func runSkillUpload(rt *Runtime, args []string, parse bool) error {
 	fs := newFS("skill upload")
-	var file, business, userID string
+	var file, business, caller string
 	fs.StringVar(&file, "file", "", "Skill ZIP")
 	fs.StringVar(&business, "business_dimension", "", "业务维度")
-	fs.StringVar(&userID, "user_id", "", "用户 ID（浏览器登录不保存工号，需显式指定）")
+	fs.StringVar(&caller, "caller_id", "", "可选：校验登录调用者工号，不能覆盖会话身份")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := required("file", file); err != nil {
 		return err
 	}
-	uid, err := rt.userID(userID)
+	uid, err := rt.callerID(caller)
 	if err != nil {
 		return err
 	}
@@ -391,8 +391,11 @@ func skillHelp() {
 
 场景 Skill 查询使用 scene-skills，四个参数分别作为结构化字段发送到
     POST /experience/harness/scene/skills；产品级场景使用 --dim_type "产品级"。
+下载/上传/校验自动从登录会话读取 caller_id，映射为市场接口既有 userId；不接受 --user_id。
+可选 --caller_id 仅校验与会话一致，不能覆盖身份。
+--version 可选；不传时由服务端选择版本，CLI 不硬编码版本或擅自补 latest。
 
 注: skill offering 的产品列表请求不携带会话 Cookie，但仍需先执行
-    coreinsight-cli auth login 通过本地登录校验（与 skill scenes 一致）。
+    coreinsight-cli auth login --caller_id <工号> 通过本地登录校验（与 skill scenes 一致）。
 `)
 }
