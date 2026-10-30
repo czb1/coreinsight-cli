@@ -12,9 +12,9 @@ description: 使用 Core Insight CLI 搜索、下载和获取缺失的 Skill，�
 1. 用 `command -v coreinsight-cli` 或平台等效命令检查 CLI；也检查项目内已安装的入口。找到本地入口后，后续命令使用其实际路径。
 2. 运行 `coreinsight-cli --help`、`coreinsight-cli version`，按需读取子命令的 `--help`。以安装版本的帮助为准，不猜测参数。
 3. 运行 `coreinsight-cli auth status`，同时检查 `caller_id` / `caller_id_bound`；只有 token 而没有绑定工号的旧会话，执行需要调用者身份的任务前须重新登录。退出码 `0` 仅表示本地存在格式有效且未标记过期的凭证；`3` 表示缺失、无效或过期。`server_verified: false` 表示没有服务端验证，不能说“已验证登录成功”。其他失败按真实错误处理。
-4. 用户明确要求登录/重新登录、本地凭证不可用，或所需调用者身份未绑定时，先取得用户提供或已核实的当前 SSO 账号工号，缺少时询问；执行默认的 `coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>"`，尝试打开用户浏览器。不要仅因使用 Agent、Bash 或子进程而加 `--no-browser`。只有用户要求手动打开，或已确认是无桌面的 SSH/容器/CI 环境时，才使用该参数。
-5. 保持登录进程运行并等待最终退出码及 JSON-RPC 结果。需要手动打开时，及时展示 stderr 中本次授权链接，让用户在命令等待期间打开；必要时使用 `auth login --caller_id <工号> --timeout 120`。启动浏览器失败时使用 CLI 已打印的当前链接，不反复重启登录使链接失效或混淆。不声称浏览器启动命令成功就代表窗口可见或用户已确认。
-6. 登录命令返回错误时按失败处理；授权失败时旧会话会保留，不得凭后续 `auth status` 为 `0` 覆盖这次失败。成功时核对返回的 `caller_id`，说明“已保存本次授权凭证并绑定输入的工号”，再继续用户已授权的原业务任务；以该业务请求实际响应判断后端是否接受凭证。不为验证登录擅自上传资料或编造身份查询接口。
+4. 用户明确要求登录/重新登录、本地凭证不可用，或所需调用者身份未绑定时，默认使用浏览器：先取得用户提供或已核实的当前 SSO 账号工号，缺少时询问；执行 `coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>"`。不要仅因使用 Agent、Bash 或子进程而加 `--no-browser`；只有用户要求手动打开或已确认无桌面环境时才使用。用户明确选择账号密码方式时，改用下方密码登录命令；不要因发现密码环境变量或浏览器启动失败就擅自切换方式。
+5. 保持登录进程运行并等待最终退出码及 JSON-RPC 结果。浏览器方式需要手动打开时，及时展示 stderr 中本次授权链接，让用户在命令等待期间打开；必要时使用 `auth login --caller_id <工号> --timeout 120`。启动浏览器失败时使用 CLI 已打印的当前链接，不反复重启登录使链接失效或混淆。不声称浏览器启动命令成功就代表窗口可见或用户已确认。密码方式不需要浏览器授权或 token 轮询。
+6. 登录命令返回错误时按失败处理；登录失败时旧会话会保留，不得凭后续 `auth status` 为 `0` 覆盖这次失败。成功时核对返回的 `caller_id`，说明已保存本次凭证并绑定工号，再继续用户已授权的原业务任务；密码接口成功不代表业务接口已经验证。以业务请求实际响应判断后端是否接受凭证，不为验证登录擅自上传资料或编造身份查询接口。
 
 登录命令：
 
@@ -24,11 +24,26 @@ coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>"
 coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>" --no-browser --timeout 120
 ```
 
-登录时输入一次 `--caller_id`，与本次 token 一起保存；后续业务调用自动读取，不再重复询问工号。`caller_id` 是用户输入的会话绑定值，当前接口未核验其与 SSO 身份的一致性，不声称工号已获服务端验证。切换账号需重新登录绑定；失败登录保留原凭证和原工号。
+浏览器登录时输入一次 `--caller_id`，与本次 token 一起保存；后续业务调用自动读取，不再重复询问工号。该值由用户输入，devUC 未核验其与 SSO 身份的一致性。密码登录自动将 `--username` 工号绑定为 `caller_id`，与 Cookie 共同保存；通常省略 `--caller_id`，若传入必须与用户名一致。切换账号或方式需重新登录；成功后替换旧凭证，失败则保留原凭证和原工号。
 
-每次显式登录使用新的随机 `fromSource`，不复用机器固定标识取回历史 token；`--no-browser` 不会绕过本次授权。浏览器已有 SSO 会话时可能自动完成授权，不保证逐次输入密码或点击确认。`saved_at` 只是本地保存时间，不能据此推断用户何时完成过浏览器授权；没有 `expires_at` 也不证明永久有效。
+每次浏览器登录使用新的随机 `fromSource`，不复用机器固定标识取回历史 token；`--no-browser` 不会绕过本次授权。浏览器已有 SSO 会话时可能自动完成授权，不保证逐次输入密码或点击确认。`saved_at` 只是本地保存时间，不能据此推断用户何时完成过浏览器授权；没有 `expires_at` 也不证明永久有效。
 
-不使用已移除的 `--username`、`--password-stdin` 或旧密码环境变量登录，不让用户把密码发到对话中，不读取或展示 `~/.coreinsight-cli/session.json`。仅在用户要求退出时执行 `auth logout`，并说明它只删除本地凭证，不撤销服务端授权或浏览器 SSO。
+用户选择账号密码直接登录时：
+
+```bash
+# 用户在本机终端无回显输入密码，不弹浏览器
+coreinsight-cli auth login --username "<工号>"
+# 脚本通过安全管道传入密码，不在对话或命令示例中填真实密码
+coreinsight-cli auth login --username "<工号>" --password-stdin
+# 已安全配置 COREINSIGHT_AUTH_USERNAME / COREINSIGHT_AUTH_PASSWORD 时
+coreinsight-cli auth login --method password
+```
+
+显式 `--username/-u`、`--password/-p` 或 `--password-stdin` 也会选择密码方式；仅设置环境变量不会改变默认浏览器方式。CLI 支持 `--password` 直接传参，但优先使用无回显输入、标准输入或已有凭证环境；不让用户把密码发到对话中，不读取或展示会话文件。无法交互输入且没有安全凭证来源时，让用户在自己的终端完成密码登录。
+
+密码接口为 `POST <auth-server>/api/auth/login`，默认基址 `https://omtool.rnd.huawei.com`，可用 `--auth-server` 或 `COREINSIGHT_AUTH_SERVER` 覆盖；不要把 devUC 授权页地址当作密码 API。密码方式不使用 `--no-browser` 或登录后的 `--timeout`；HTTP 超时放在命令前。`--password` 与 `--password-stdin` 互斥，`--method browser` 与账密参数互斥。旧 `--body` / `--body-file` 及 `OMRES_AUTH_*` 不作为密码入口。
+
+仅在用户要求退出时执行 `auth logout`，并说明它只删除本地凭证，不撤销服务端授权或浏览器 SSO。
 
 ### CLI 不存在时
 

@@ -14,7 +14,9 @@ Windows 使用 `go build -o coreinsight-cli.exe ./cmd/coreinsight-cli`。更新�
 
 ## 1. 登录
 
-登录时用 `--caller_id` 输入一次当前 SSO 账号的工号，CLI 默认尝试打开浏览器完成 devUC 授权，无需在命令行输入密码。每次显式执行 `auth login` 都创建新的授权事务，业务请求使用保存的 token 通过 `X-Auth-Token` 头鉴权。客户端没有服务端有效期信息，不将其解释为“永久有效”。
+CLI **默认尝试打开浏览器**完成 devUC 授权，用 `--caller_id` 输入一次当前 SSO 账号的工号。也支持显式选择账号密码直接登录：传入 `--username`（或 `-u`）、`--password`（或 `-p`）、`--password-stdin` 中任一账密参数，或使用 `--method password`。仅设置账号密码环境变量不会改变默认浏览器方式；`--method browser` 不能与账密参数混用。
+
+浏览器登录每次创建新的授权事务，业务请求使用保存的 token，通过 `X-Auth-Token` 头鉴权；账号密码登录保存 Cookie，业务请求使用 `Cookie` 头。切换登录方式成功后替换旧凭证，失败时保留原会话。
 
 ```bash
 # 默认：自动打开浏览器完成授权
@@ -33,7 +35,7 @@ coreinsight-cli auth status
 coreinsight-cli auth logout
 ```
 
-登录流程：
+浏览器登录流程：
 
 1. 使用加密随机源生成本次登录专用的 256 位 `fromSource`（64 位十六进制字符串），请求 `GET <market>/mcpService/external/v1/auth/devUC/authorizeUrl?fromSource=<key>`。不再使用用户名和主机名派生的固定标识。
 2. 校验授权 URL 后，尝试打开默认浏览器，并向 stderr 打印链接。Windows 使用 `powershell Start-Process`；CLI 等待启动命令退出并报告错误。启动命令成功不保证窗口可见，也不证明用户已确认。不能仅因命令由 Agent/Bash 子进程执行就默认加 `--no-browser`。
@@ -42,6 +44,28 @@ coreinsight-cli auth logout
 5. 只在收到格式有效的 token 后，将 token 与本次输入的 `caller_id` 一起保存到 `~/.coreinsight-cli/session.json`（请求创建目录 0700、文件 0600；实际权限遵循操作系统）。授权失败保留已有会话，不能据旧会话的 `auth status` 把这次失败说成成功。
 
 devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场地址（默认 `https://agent.huawei.com`）。`auth login --caller_id <工号> --timeout 120` 设置 token 轮询总时限；放在命令之前的 `--timeout` 设置单次 HTTP 请求超时，例如 `coreinsight-cli --timeout 15 auth login --caller_id "<工号>" --timeout 120`。
+
+账号密码直接登录：
+
+```bash
+# 推荐：在本机交互终端无回显输入密码，不打开浏览器
+coreinsight-cli auth login --username "<工号>"
+
+# 兼容直接传入账号密码（密码可能留在命令历史和进程参数中）
+coreinsight-cli auth login --username "<工号>" --password "<密码>"
+
+# 脚本：从标准输入读取密码，例如由凭证管理器通过管道提供
+coreinsight-cli auth login --username "<工号>" --password-stdin
+
+# 已设置 COREINSIGHT_AUTH_USERNAME / COREINSIGHT_AUTH_PASSWORD 时，显式选用密码方式
+coreinsight-cli auth login --method password
+```
+
+密码登录恢复既有接口：`POST https://omtool.rnd.huawei.com/api/auth/login`，JSON 请求体为 `{"userName":"<工号>","passwd":"<密码>"}`。可用 `--auth-server` / `COREINSIGHT_AUTH_SERVER` 覆盖基址，`--server` 也保留对该基址的覆盖兼容；`--market-server` 只影响浏览器授权。HTTP 超时使用命令前的 `--timeout`，例如 `coreinsight-cli --timeout 30 auth login --username "<工号>"`；密码方式不能混用 `--no-browser` 或登录后的轮询 `--timeout`。
+
+用户名优先取 `--username/-u`，未传时取 `COREINSIGHT_AUTH_USERNAME`。密码优先取显式 `--password/-p` 或 `--password-stdin`（二者互斥），未传时取 `COREINSIGHT_AUTH_PASSWORD`，最后尝试终端无回显输入；无法关闭回显时返回错误。不会保存密码，登录调试日志和错误不输出密码或响应原文。密码请求不跟随重定向；必须收到成功 HTTP 状态、明确的 JSON 业务成功标记和有效 Cookie 才保存。Cookie 的有效期取服务端声明，不把未提供有效期解释为永久有效。
+
+密码登录将 `--username` 工号自动绑定为 `caller_id`；不必另传 `--caller_id`，若传入则必须与用户名一致。后续仍自动携带调用者工号，`--user_id` 只用于检索过滤。旧的原始请求体 `--body` / `--body-file` 和 `OMRES_AUTH_*` 环境变量不属于恢复的登录入口。
 
 认证输出说明：
 
@@ -57,11 +81,11 @@ devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 
 
 | 字段 | 来源与用途 |
 | --- | --- |
-| 会话 `caller_id` | 登录时输入一次并与本次 token 共同保存；后续调用自动读取。它是用户填写的工号，当前 devUC 接口不提供服务端身份核验，应填写当前 SSO 账号对应工号 |
+| 会话 `caller_id` | 浏览器方式从 `--caller_id` 输入，与 token 共同保存（devUC 未核验其与 SSO 身份的一致性）；密码方式自动取登录 `username`，与 Cookie 共同保存。后续调用自动读取 |
 | 检索 `--user_id` | 可选过滤条件；不传则不按用户过滤，绝不自动填登录工号 |
 | 业务命令 `--caller_id` | 可选的一致性校验参数；只有与会话相同才允许执行，不能覆盖调用者身份 |
 
-`auth status` 输出 `caller_id` 和 `caller_id_bound`。旧版只有 token 的会话会显示 `caller_id_bound: false`；执行需要调用者身份的任务前，重新登录绑定工号。旧 Cookie 会话可继续读取已保存的 `username` 作为调用者。新登录不沿用上一次会话的工号；授权失败时保留原 token 和原工号。
+`auth status` 输出 `caller_id` 和 `caller_id_bound`。旧版只有 token 的会话会显示 `caller_id_bound: false`；执行需要调用者身份的任务前，重新登录绑定工号。旧 Cookie 会话可继续读取已保存的 `username` 作为调用者。新登录不沿用上一次会话的工号；登录失败时保留原凭证和原工号。
 
 升级后，旧版本误存的 `<nil>`、错误 JSON 等明显无效凭证会被本地检查拦截。用户要求重新登录时执行 `auth login --caller_id <工号>`；正常执行已授权的业务任务时可以复用现有本地凭证。服务端仍可撤销或拒绝凭证，以业务请求的实际响应为准。
 
@@ -126,9 +150,9 @@ coreinsight-cli skill verify --file ./skill.zip --business_dimension "产品级"
 
 `skill offering` 只执行 `skill scenes` 的第一步：把代码仓 URL（由 `--repo` 解析 origin，或由 `--http_url` 直接指定）发送到 Core Harness `POST /core-harness/api/v1/offering/list`，body 为 `{page, pageSize=20, http_url}`，返回该代码仓归属的产品列表。该产品列表请求不携带会话 Cookie，但仍需通过本地登录校验（与 `skill scenes` 一致）。
 
-`skill product-scenes` 执行第二步：用 `--dim_code`（取上一步返回的 `offering_id`）调用 Chat `POST /experience/harness/scenes`，body 为 `{dimCode}`，携带登录凭证（新登录使用 `X-Auth-Token`，兼容旧 Cookie），返回该产品的场景列表。
+`skill product-scenes` 执行第二步：用 `--dim_code`（取上一步返回的 `offering_id`）调用 Chat `POST /experience/harness/scenes`，body 为 `{dimCode}`，携带登录凭证（浏览器登录使用 `X-Auth-Token`，账号密码登录使用 Cookie），返回该产品的场景列表。
 
-`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录凭证（新登录使用 `X-Auth-Token`，兼容旧 Cookie），返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
+`skill scene-skills` 执行第三步：用 `--first_scene`、`--second_scene`、`--dim_type`、`--dim_name` 调用 Chat `POST /experience/harness/scene/skills`，body 为 `{firstScene, secondScene, dimType, dimName}`，携带登录凭证（浏览器登录使用 `X-Auth-Token`，账号密码登录使用 Cookie），返回该场景下的 skill 列表。四个参数均必填并独立透传；产品级查询使用 `--dim_type "产品级"`，`--dim_name` 取产品名（`offering_cn_name`），场景名称取该产品返回的场景列表。
 
 `skill scene-search` 已移除，不保留别名或关键词拼接逻辑。已有场景查询调用请迁移到 `skill scene-skills`，将原 `--product` 改为 `--dim_name`，并补充 `--dim_type "产品级"`。
 
@@ -199,7 +223,8 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
-- `COREINSIGHT_AUTH_SERVER`
+- `COREINSIGHT_AUTH_SERVER`（账号密码登录基址，默认 `https://omtool.rnd.huawei.com`）
+- `COREINSIGHT_AUTH_USERNAME` / `COREINSIGHT_AUTH_PASSWORD`（仅在显式选择密码登录后读取）
 - `COREINSIGHT_MARKET_SERVER`（devUC 浏览器授权登录的市场服务地址，默认 `https://agent.huawei.com`）
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`
@@ -225,7 +250,7 @@ coreinsight-cli --chat-server https://chat.example.internal/chat --debug rag \
 ```
 
 - `--chat-server` 指向 Chat 基址（默认 `<COREINSIGHT_SERVER>/chat`），CLI 会追加 `/app/support/app/chat` 或 `/app/support/app/retrieve`。环境变量末尾的斜杠会先移除，避免生成 `//chat`。
-- JSON 业务请求遇到会把 POST 改为 GET 的 301/302/303 时，直接报告重定向及目标地址；同方法的 307/308 仍可跟随。登录请求保持参考 CLI 的行为。
+- JSON 业务请求遇到会把 POST 改为 GET 的 301/302/303 时，直接报告重定向及目标地址；同方法的 307/308 仍可跟随。账号密码登录请求不跟随任何重定向，浏览器授权流程保持不变。
 - 405 错误包含实际请求方法、URL 和后端返回的 `Allow`（若存在）。应结合网关路由检查，不能仅凭 405 判定为“接口限制”。
 - 网络错误区分 DNS、连接失败和一般超时，并保留底层错误。一般超时不能直接证明服务器不可达，也可能是后端等待过久。核对内网/VPN、DNS、代理及 `NO_PROXY`，确认地址正确后再考虑 `--timeout`。
 - `--debug` 会输出业务请求体，请对分享的日志脱敏。

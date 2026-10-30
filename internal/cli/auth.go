@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,9 +36,13 @@ var errUnauthenticated = errors.New("unauthenticated")
 var errAuthorizationTimeout = errors.New("授权超时：未在时限内收到本次浏览器授权的 token")
 
 type loginOpts struct {
-	callerID    string
-	noBrowser   bool
-	timeoutSecs int
+	callerID      string
+	noBrowser     bool
+	timeoutSecs   int
+	method        string
+	username      string
+	password      string
+	passwordStdin bool
 }
 
 func runAuth(rt *Runtime, args []string) error {
@@ -58,16 +63,22 @@ func runAuth(rt *Runtime, args []string) error {
 }
 
 func runAuthLogin(rt *Runtime, args []string) error {
-	if hasHelp(args) {
-		authLoginHelp()
-		return nil
-	}
 	var o loginOpts
 	fs := newFS("auth login")
+	fs.StringVar(&o.method, "method", "", "登录方式 browser/password；默认浏览器，显式账密参数选择密码登录")
+	fs.StringVar(&o.username, "username", "", "账号密码登录的工号，同时绑定为 caller_id")
+	fs.StringVar(&o.username, "u", "", "--username 的简写")
+	fs.StringVar(&o.password, "password", "", "密码；推荐使用交互输入或 --password-stdin")
+	fs.StringVar(&o.password, "p", "", "--password 的简写")
+	fs.BoolVar(&o.passwordStdin, "password-stdin", false, "从标准输入读取密码")
 	fs.StringVar(&o.callerID, "caller_id", "", "本次登录绑定的调用者工号，后续业务命令自动携带")
 	fs.BoolVar(&o.noBrowser, "no-browser", false, "不自动打开浏览器，仅打印授权链接供手动复制")
 	fs.IntVar(&o.timeoutSecs, "timeout", pollMaxRetry, "授权轮询超时秒数（默认 60）")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			authLoginHelp()
+			return nil
+		}
 		return err
 	}
 	if o.timeoutSecs <= 0 {
@@ -76,6 +87,24 @@ func runAuthLogin(rt *Runtime, args []string) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("auth login 不接受位置参数")
 	}
+	set := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	credentials := set["username"] || set["u"] || set["password"] || set["p"] || o.passwordStdin
+	switch o.method {
+	case "", "browser", "password":
+	default:
+		return fmt.Errorf("--method 必须为 browser 或 password")
+	}
+	if o.method == "browser" && credentials {
+		return fmt.Errorf("--method browser 不能与账号密码参数一起使用")
+	}
+	if o.method == "password" || credentials {
+		if o.noBrowser || set["timeout"] {
+			return fmt.Errorf("密码登录不使用 --no-browser 或登录后的 --timeout；HTTP 超时请放在 auth login 之前")
+		}
+		return runPasswordLogin(rt, &o, set)
+	}
+
 	o.callerID = strings.TrimSpace(o.callerID)
 	if err := required("caller_id", o.callerID); err != nil {
 		return fmt.Errorf("登录时需输入一次调用者工号：coreinsight-cli auth login --caller_id <工号>；后续调用自动读取会话")
@@ -141,6 +170,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 		"credential_state":           "stored",
 		"server_verified":            false,
 		"source":                     "devuc_token_response",
+		"method":                     "browser",
 		"caller_id":                  sess.callerID(),
 		"caller_id_bound":            true,
 		"caller_id_source":           "login_input",
@@ -328,13 +358,21 @@ func maskedToken(token string) string {
 }
 
 func authHelp() {
-	plainHelp("用法:\n  coreinsight-cli auth login --caller_id <工号> [登录参数]\n  coreinsight-cli auth status\n  coreinsight-cli auth logout\n")
+	plainHelp("用法:\n  coreinsight-cli auth login --caller_id <工号> [登录参数]  默认浏览器\n  coreinsight-cli auth login --username <工号> [密码参数]  账号密码登录\n  coreinsight-cli auth status\n  coreinsight-cli auth logout\n")
 }
 func authLoginHelp() {
 	plainHelp(`用法:
   coreinsight-cli auth login --caller_id <工号>
   coreinsight-cli auth login --caller_id <工号> --no-browser
   coreinsight-cli auth login --caller_id <工号> --timeout 120
+  coreinsight-cli auth login --username <工号>
+  coreinsight-cli auth login --username <工号> --password-stdin
+  coreinsight-cli auth login --username <工号> --password <密码>
+  coreinsight-cli auth login --method password
+
+默认使用浏览器；显式 --username/-u、--password/-p 或 --password-stdin
+选择账号密码登录，也可使用 --method password。环境变量本身不切换默认方式。
+--method browser 与账密参数不能混用；--no-browser 只用于浏览器授权。
 
 浏览器授权登录（复用 agentcenter devUC 流程）:
   1. 每次生成新的随机授权标识，向市场服务请求授权页 URL
@@ -343,15 +381,26 @@ func authLoginHelp() {
   4. 校验成功响应后，将 token 和本次输入的 caller_id 一起保存到会话
 
 参数:
-  --caller_id <工号>  本次登录绑定的调用者工号（必填，后续业务命令自动读取）
+  --caller_id <工号>  浏览器登录必填；密码登录自动使用 username，若传入则必须一致
   --no-browser        不自动打开浏览器，仅打印授权链接
   --timeout <seconds> 授权轮询超时秒数（默认 60）
   --market-server <url> 覆盖市场服务地址（默认 https://agent.huawei.com，可用环境变量 COREINSIGHT_MARKET_SERVER）
 
+账号密码登录（POST https://omtool.rnd.huawei.com/api/auth/login）:
+  --username/-u <工号>  登录账号；未传时读取 COREINSIGHT_AUTH_USERNAME
+  --password/-p <密码>  直接传入密码（可能留在命令历史或进程参数，推荐以下方式）
+  --password-stdin     从标准输入读取密码，不能与 --password 同时使用
+  未指定密码时读取 COREINSIGHT_AUTH_PASSWORD，再尝试终端无回显输入。
+  --method password    显式选择密码登录，可配合上述环境变量用于脚本
+  --auth-server <url>  覆盖密码登录服务，可用 COREINSIGHT_AUTH_SERVER；不影响 devUC
+  请求体为 userName/passwd；校验成功状态及 Cookie 后保存，会话不存储密码。
+  HTTP 超时放在命令前，例如: coreinsight-cli --timeout 30 auth login --username <工号>
+
 注: --no-browser 仅关闭自动打开，仍需完成本次授权。已有浏览器 SSO
     可能自动完成授权。后端未返回有效期不代表 token 永久有效。
     auth status 只检查本地凭证，不验证服务端。logout 只清除本地凭证。
-    caller_id 由本次登录时输入，并非服务端返回的已验证身份；请填写当前 SSO 账号的工号。
+    浏览器 caller_id 由本次输入，并非服务端返回的已验证身份；请填当前 SSO 账号工号。
+    密码登录将 username 绑定为 caller_id；业务请求使用 Cookie，不继承旧 token。
     user_id 是检索过滤字段，不作为登录身份；业务命令不能覆盖会话 caller_id。
 `)
 }

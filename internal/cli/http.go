@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const defaultAuthServer = "https://login.huawei.com/login1"
+const defaultAuthServer = "https://omtool.rnd.huawei.com"
 
 // defaultMarketServer 是 agentcenter devUC 浏览器授权登录所在的市场域，
 // 授权页 URL 申请和 token 轮询都挂在这个 baseURL 下。
@@ -98,7 +98,7 @@ func (rt *Runtime) callerID(expected string) (string, error) {
 
 // addSessionAuth 给业务请求注入鉴权凭证：
 // 优先用 devUC 浏览器登录拿到的 Token（X-Auth-Token 头，与 agentcenter/aimarket-sdk 一致）；
-// 旧版账密登录产生的 Cookie 会话文件仍兼容，回退到 Cookie 头。
+// 账号密码登录使用 Cookie 头；旧版 Cookie 会话文件仍兼容。
 func (rt *Runtime) addSessionAuth(req *http.Request) {
 	if rt.Session == nil {
 		return
