@@ -83,17 +83,30 @@ func TestSkillSceneSkills(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, path, cookie = r.Method, r.URL.Path, r.Header.Get("Cookie")
 		decodeErr = json.NewDecoder(r.Body).Decode(&body)
-		_, _ = w.Write([]byte(`{"code":200,"data":[{"skill_id":"sk1","skill_name":"MML生成"}]}`))
+		_, _ = w.Write([]byte(`{"code":200,"data":[
+			{"skillName":"ps-ci-package-build","skillDescription":"基于pipelineX构建与出包","versions":[
+				{"version":"0.2.1","uploadDate":"2026-10-10 17:32:24","downloadUrl":"https://example.test/0.2.1.zip"},
+				{"version":"0.2.2","uploadDate":"2026-10-12 14:25:21","downloadUrl":"https://example.test/0.2.2.zip","checksum":"kept"},
+				{"version":"0.2.0","uploadDate":"2026-10-10 11:51:39","downloadUrl":"https://example.test/0.2.0.zip"}
+			]},
+			{"skillName":"mml-generator","skillDescription":"MML生成","versions":[
+				{"version":"1.0.0","uploadDate":"2026-10-10 12:00:00","downloadUrl":"https://example.test/mml-1.0.0.zip"},
+				{"version":"1.1.0","uploadDate":"2026-10-11 12:00:00","downloadUrl":"https://example.test/mml-1.1.0.zip"}
+			]}
+		]}`))
 	}))
 	defer srv.Close()
 	rt := &Runtime{ChatServer: srv.URL + "/chat", Timeout: 5 * time.Second, Session: &Session{Username: "tester", Cookie: "sid=test"}}
 
-	err := runSkill(rt, []string{
-		"scene-skills",
-		"--first_scene", "需求开发",
-		"--second_scene", "MML开发",
-		"--dim_type", "产品级",
-		"--dim_name", "UPCF",
+	var err error
+	output := captureAuthStdout(t, func() {
+		err = runSkill(rt, []string{
+			"scene-skills",
+			"--first_scene", "需求开发",
+			"--second_scene", "MML开发",
+			"--dim_type", "产品级",
+			"--dim_name", "UPCF",
+		})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +122,30 @@ func TestSkillSceneSkills(t *testing.T) {
 	}
 	if !reflect.DeepEqual(body, want) {
 		t.Fatalf("body=%#v want=%#v", body, want)
+	}
+	var response rpcResponse
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.JSONRPC != "2.0" || response.Error != nil {
+		t.Fatalf("unexpected JSON-RPC response: %#v", response)
+	}
+	var wantResult interface{}
+	if err := json.Unmarshal([]byte(`{
+		"first_scene":"需求开发","second_scene":"MML开发","dim_type":"产品级","dim_name":"UPCF",
+		"skills":[
+			{"skillName":"ps-ci-package-build","skillDescription":"基于pipelineX构建与出包","versions":[
+				{"version":"0.2.2","uploadDate":"2026-10-12 14:25:21","downloadUrl":"https://example.test/0.2.2.zip","checksum":"kept"}
+			]},
+			{"skillName":"mml-generator","skillDescription":"MML生成","versions":[
+				{"version":"1.1.0","uploadDate":"2026-10-11 12:00:00","downloadUrl":"https://example.test/mml-1.1.0.zip"}
+			]}
+		]
+	}`), &wantResult); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(response.Result, wantResult) {
+		t.Fatalf("result=%#v want=%#v", response.Result, wantResult)
 	}
 }
 
