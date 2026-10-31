@@ -40,8 +40,10 @@ coreinsight-cli auth logout
 1. 使用加密随机源生成本次登录专用的 256 位 `fromSource`（64 位十六进制字符串），请求 `GET <market>/mcpService/external/v1/auth/devUC/authorizeUrl?fromSource=<key>`。不再使用用户名和主机名派生的固定标识。
 2. 校验授权 URL 后，尝试打开默认浏览器，并向 stderr 打印链接。Windows 使用 `powershell Start-Process`；CLI 等待启动命令退出并报告错误。启动命令成功不保证窗口可见，也不证明用户已确认。不能仅因命令由 Agent/Bash 子进程执行就默认加 `--no-browser`。
 3. 用本次相同的 `fromSource` 轮询 `GET <market>/mcpService/external/v1/auth/devUC/token?fromSource=<key>`。已有浏览器 SSO 可能自动完成授权，不一定再次要求输入密码或点击确认。`--no-browser` 仅关闭自动打开，不跳过授权；应在命令等待期间手动打开本次链接。
-4. 严格检查 HTTP 状态、响应类型及 JSON 业务成功状态。空响应、JSON `null`、成功响应中的空 `data` / `data: null` 继续等待；HTTP/业务错误、HTML、对象/数字类型 token、无效 token 格式均不会保存。保留纯字符串 token 格式兼容，不把错误 JSON 整体转成 token。
+4. 严格检查 HTTP 状态、响应类型及 JSON 业务成功状态。token 轮询遇到空响应、JSON `null`、成功响应中缺少 `data`（如 `{"code":200,"message":"OK"}`）、空字符串 `data` 或 `data: null` 时，均视为等待授权，继续轮询直到收到有效 token 或超时。HTTP/业务错误、缺少明确成功状态、HTML、对象/数字类型 token、无效 token 格式仍立即报错。保留纯字符串 token 格式兼容，不把错误 JSON 整体转成 token。申请授权链接时仍必须取得有效的 HTTP(S) URL。
 5. 只在收到格式有效的 token 后，将 token 与本次输入的 `caller_id` 一起保存到 `~/.coreinsight-cli/session.json`（请求创建目录 0700、文件 0600；实际权限遵循操作系统）。授权失败保留已有会话，不能据旧会话的 `auth status` 把这次失败说成成功。
+
+排障时区分浏览器启动与 token 轮询：轮询报错不能证明浏览器未弹出，也不应因此改用 `--no-browser`。旧版在 token 轮询收到上述成功但缺少 `data` 的响应时会报“授权接口 JSON 缺少 data”并提前退出；需更新源码、重新构建并替换实际运行的可执行文件后重试。
 
 devUC token 是市场域凭证，无需额外 Cookie。可用 `--market-server` 或 `COREINSIGHT_MARKET_SERVER` 覆盖市场地址（默认 `https://agent.huawei.com`）。`auth login --caller_id <工号> --timeout 120` 设置 token 轮询总时限；放在命令之前的 `--timeout` 设置单次 HTTP 请求超时，例如 `coreinsight-cli --timeout 15 auth login --caller_id "<工号>" --timeout 120`。
 
