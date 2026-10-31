@@ -35,8 +35,9 @@ func readAuthResponse(resp *http.Response) ([]byte, error) {
 }
 
 // Accept the legacy plain-string format and explicit successful JSON envelopes.
-// Empty/null responses represent pending authorization. Never stringify JSON errors
-// or non-string data into credentials.
+// Empty/null responses and successful envelopes with missing/null data have no
+// value yet: token polling treats them as pending, while URL fetching rejects
+// them as invalid URLs. Never stringify JSON errors or non-string data into credentials.
 func authResponseString(raw []byte) (string, error) {
 	body := strings.TrimSpace(string(raw))
 	if body == "" {
@@ -58,10 +59,9 @@ func authResponseString(raw []byte) (string, error) {
 		if err := checkAuthSuccess(v); err != nil {
 			return "", err
 		}
-		data, exists := v["data"]
-		if !exists {
-			return "", fmt.Errorf("授权接口 JSON 缺少 data")
-		}
+		// devUC can return {"code":200,"message":"OK"} before authorization
+		// completes. Only after checking success may missing data mean pending.
+		data := v["data"]
 		if data == nil {
 			return "", nil
 		}

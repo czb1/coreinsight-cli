@@ -28,6 +28,8 @@ coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>" --no-browser 
 
 每次浏览器登录使用新的随机 `fromSource`，不复用机器固定标识取回历史 token；`--no-browser` 不会绕过本次授权。浏览器已有 SSO 会话时可能自动完成授权，不保证逐次输入密码或点击确认。`saved_at` 只是本地保存时间，不能据此推断用户何时完成过浏览器授权；没有 `expires_at` 也不证明永久有效。
 
+区分浏览器启动与 token 轮询错误，不要因轮询失败就声称浏览器未弹出或追加 `--no-browser` 重启登录。token 轮询返回明确成功但缺少 `data`（如 `{"code":200,"message":"OK"}`）、`data: null` 或空字符串时，保持进程等待后续 token 或超时；HTTP/业务失败及无明确成功状态的响应仍按错误处理。旧版在上述缺少 `data` 的轮询响应上会提前退出，先核对实际运行的 CLI 版本与路径，更新并重新构建后再重试。
+
 用户选择账号密码直接登录时：
 
 ```bash

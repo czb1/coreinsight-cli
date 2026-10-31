@@ -32,7 +32,8 @@ func TestTokenResponsesRejectErrors(t *testing.T) {
 		`{"code":500,"data":"looks-like-a-token"}`,
 		`{"code":200,"success":false,"data":"looks-like-a-token"}`,
 		`{"data":"looks-like-a-token"}`,
-		`{"code":200}`, `{"code":null,"data":"token"}`,
+		`{}`, `{"message":"OK"}`, `{"code":null,"data":"token"}`,
+		`{"code":200,"success":false}`, `{"success":false}`,
 		`{"code":{},"data":"token"}`, `{"success":{},"data":"token"}`,
 		`{"code":200,"data":{}}`, `{"code":200,"data":[]}`,
 		`{"code":200,"data":42}`, `{"code":200,"data":false}`,
@@ -47,7 +48,11 @@ func TestTokenResponsesRejectErrors(t *testing.T) {
 			}
 		})
 	}
-	for _, body := range []string{``, `null`, `""`, `{"code":200,"data":null}`, `{"code":"200","data":" "}`} {
+	for _, body := range []string{
+		``, `null`, `""`, `{"code":200,"data":null}`, `{"code":"200","data":" "}`,
+		`{"code":200}`, `{"code":200,"message":"OK"}`, `{"code":"200"}`,
+		`{"code":0}`, `{"code":"0"}`, `{"success":true}`,
+	} {
 		if token, err := extractToken([]byte(body)); err != nil || token != "" {
 			t.Fatalf("pending response %s: token=%q err=%v", body, token, err)
 		}
@@ -68,6 +73,7 @@ func TestInvalidLoginResponsesNeverSaveSession(t *testing.T) {
 		{"server error", `private-detail`, "text/plain", 500},
 		{"business error", `{"code":500,"data":"private-detail"}`, "application/json", 200},
 		{"null pending", `{"code":200,"data":null}`, "application/json", 200},
+		{"missing data pending", `{"code":200,"message":"OK"}`, "application/json", 200},
 		{"malformed JSON", `{"code":200,"data":"private-detail"`, "application/json", 200},
 		{"wrong type", `{"code":200,"data":{}}`, "application/json", 200},
 		{"HTML", `private-detail`, "text/html", 200},
@@ -93,6 +99,9 @@ func TestInvalidLoginResponsesNeverSaveSession(t *testing.T) {
 			})
 			if strings.Contains(output, "private-detail") || strings.Contains(output, `"authenticated": true`) {
 				t.Fatalf("failure leaked response or claimed success: %s", output)
+			}
+			if strings.HasSuffix(tc.name, "pending") && !strings.Contains(output, "Authorization Timeout") {
+				t.Fatalf("pending response must wait until authorization times out: %s", output)
 			}
 			if _, err := os.Stat(sessionFile()); !os.IsNotExist(err) || rt.Session != nil {
 				t.Fatalf("failed login must not save a session: stat=%v", err)
@@ -164,7 +173,7 @@ func TestNoBrowserPendingDoesNotReuseOrOverwriteSavedSession(t *testing.T) {
 			fmt.Fprint(w, `https://login.example.com/auth`)
 			return
 		}
-		fmt.Fprint(w, `{"code":200,"data":null}`)
+		fmt.Fprint(w, `{"code":200,"message":"OK"}`)
 	}))
 	defer srv.Close()
 	old := openBrowserFn
@@ -181,7 +190,7 @@ func TestNoBrowserPendingDoesNotReuseOrOverwriteSavedSession(t *testing.T) {
 }
 
 func TestInvalidAuthorizeResponsesAreRejected(t *testing.T) {
-	for _, body := range []string{`{"code":401,"data":"https://login.example.com"}`, `{"code":200,"data":null}`, `{"code":200,"data":{}}`, `<html>failure</html>`, `javascript:alert(1)`, `https:///missing-host`, `https://user:pass@example.com`, `https://example.com/ space`} {
+	for _, body := range []string{`{"code":401,"data":"https://login.example.com"}`, `{"code":200,"message":"OK"}`, `{"success":true}`, `{"code":200,"data":null}`, `{"code":200,"data":{}}`, `<html>failure</html>`, `javascript:alert(1)`, `https:///missing-host`, `https://user:pass@example.com`, `https://example.com/ space`} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
 		_, err := fetchAuthorizeURL(&Runtime{Timeout: time.Second}, srv.URL, "test-key")
 		srv.Close()

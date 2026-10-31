@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -124,7 +126,7 @@ func TestPollTokenSucceeds(t *testing.T) {
 
 func TestPollTokenTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"code":200,"data":""}`))
+		_, _ = w.Write([]byte(`{"code":200,"message":"OK"}`))
 	}))
 	defer srv.Close()
 
@@ -133,9 +135,9 @@ func TestPollTokenTimeout(t *testing.T) {
 	defer func() { pollInterval = old }()
 
 	rt := &Runtime{MarketServer: srv.URL, Timeout: 5 * time.Second}
-	_, err := pollToken(rt, srv.URL, "fs-key", 3)
-	if err == nil {
-		t.Fatal("expected timeout error")
+	token, err := pollToken(rt, srv.URL, "fs-key", 3)
+	if token != "" || !errors.Is(err, errAuthorizationTimeout) {
+		t.Fatalf("expected authorization timeout without a token, got token=%q err=%v", token, err)
 	}
 }
 
@@ -149,7 +151,15 @@ func TestRunAuthLoginEndToEnd(t *testing.T) {
 			atomic.AddInt32(&authorizeCalled, 1)
 			_, _ = w.Write([]byte(`https://login.example.com/auth?z=9`))
 		case devUCTokenPath:
-			atomic.AddInt32(&tokenCalled, 1)
+			n := atomic.AddInt32(&tokenCalled, 1)
+			if _, err := os.Stat(sessionFile()); !os.IsNotExist(err) {
+				t.Error("session must not be saved before receiving a token")
+			}
+			// Opening the browser does not mean the user has finished authorizing.
+			if n < 3 {
+				_, _ = w.Write([]byte(`{"code":200,"message":"OK"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"code":200,"data":"e2e-token"}`))
 		default:
 			t.Errorf("unexpected path=%s", r.URL.Path)
@@ -160,7 +170,8 @@ func TestRunAuthLoginEndToEnd(t *testing.T) {
 	oldInterval := pollInterval
 	oldBrowser := openBrowserFn
 	pollInterval = 5 * time.Millisecond
-	openBrowserFn = func(string) error { return nil }
+	browserOpened := 0
+	openBrowserFn = func(string) error { browserOpened++; return nil }
 	defer func() {
 		pollInterval = oldInterval
 		openBrowserFn = oldBrowser
@@ -169,14 +180,14 @@ func TestRunAuthLoginEndToEnd(t *testing.T) {
 	if got := Run([]string{"--market-server", srv.URL, "auth", "login", "--caller_id", "employee001"}); got != 0 {
 		t.Fatalf("Run(auth login) = %d, want 0", got)
 	}
-	if atomic.LoadInt32(&authorizeCalled) == 0 || atomic.LoadInt32(&tokenCalled) == 0 {
-		t.Fatal("authorize/token endpoints not called")
+	if atomic.LoadInt32(&authorizeCalled) != 1 || atomic.LoadInt32(&tokenCalled) != 3 || browserOpened != 1 {
+		t.Fatalf("login must open the browser once and keep polling: authorize=%d token=%d browser=%d", authorizeCalled, tokenCalled, browserOpened)
 	}
 	s, err := loadSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s == nil || s.Token != "e2e-token" {
+	if s == nil || s.Token != "e2e-token" || s.CallerID != "employee001" {
 		t.Fatalf("session token=%v", s)
 	}
 }
