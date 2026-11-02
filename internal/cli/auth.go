@@ -43,6 +43,8 @@ type loginOpts struct {
 	username      string
 	password      string
 	passwordStdin bool
+	body          string
+	bodyFile      string
 }
 
 func runAuth(rt *Runtime, args []string) error {
@@ -71,6 +73,8 @@ func runAuthLogin(rt *Runtime, args []string) error {
 	fs.StringVar(&o.password, "password", "", "密码；推荐使用交互输入或 --password-stdin")
 	fs.StringVar(&o.password, "p", "", "--password 的简写")
 	fs.BoolVar(&o.passwordStdin, "password-stdin", false, "从标准输入读取密码")
+	fs.StringVar(&o.body, "body", "", "原始登录 JSON 请求体")
+	fs.StringVar(&o.bodyFile, "body-file", "", "从文件读取原始登录 JSON，优先于 --body")
 	fs.StringVar(&o.callerID, "caller_id", "", "本次登录绑定的调用者工号，后续业务命令自动携带")
 	fs.BoolVar(&o.noBrowser, "no-browser", false, "不自动打开浏览器，仅打印授权链接供手动复制")
 	fs.IntVar(&o.timeoutSecs, "timeout", pollMaxRetry, "授权轮询超时秒数（默认 60）")
@@ -89,7 +93,7 @@ func runAuthLogin(rt *Runtime, args []string) error {
 	}
 	set := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	credentials := set["username"] || set["u"] || set["password"] || set["p"] || o.passwordStdin
+	credentials := set["username"] || set["u"] || set["password"] || set["p"] || o.passwordStdin || set["body"] || set["body-file"]
 	switch o.method {
 	case "", "browser", "password":
 	default:
@@ -369,8 +373,9 @@ func authLoginHelp() {
   coreinsight-cli auth login --username <工号> --password-stdin
   coreinsight-cli auth login --username <工号> --password <密码>
   coreinsight-cli auth login --method password
+  coreinsight-cli auth login --body-file <登录JSON文件>
 
-默认使用浏览器；显式 --username/-u、--password/-p 或 --password-stdin
+默认使用浏览器；显式 --username/-u、--password/-p、--password-stdin、--body 或 --body-file
 选择账号密码登录，也可使用 --method password。环境变量本身不切换默认方式。
 --method browser 与账密参数不能混用；--no-browser 只用于浏览器授权。
 
@@ -386,14 +391,20 @@ func authLoginHelp() {
   --timeout <seconds> 授权轮询超时秒数（默认 60）
   --market-server <url> 覆盖市场服务地址（默认 https://agent.huawei.com，可用环境变量 COREINSIGHT_MARKET_SERVER）
 
-账号密码登录（POST https://omtool.rnd.huawei.com/api/auth/login）:
-  --username/-u <工号>  登录账号；未传时读取 COREINSIGHT_AUTH_USERNAME
+账号密码登录（POST https://login.huawei.com/login1/rest/hwidcenter/login）:
+  --username/-u <工号>  登录账号；未传时读取 COREINSIGHT_AUTH_USERNAME，再读 OMRES_AUTH_USERNAME
+  显式选择密码方式但未提供账号时，可在终端交互输入工号。
   --password/-p <密码>  直接传入密码（可能留在命令历史或进程参数，推荐以下方式）
   --password-stdin     从标准输入读取密码，不能与 --password 同时使用
-  未指定密码时读取 COREINSIGHT_AUTH_PASSWORD，再尝试终端无回显输入。
+  未指定密码时读取 COREINSIGHT_AUTH_PASSWORD，再读 OMRES_AUTH_PASSWORD，最后尝试终端无回显输入。
+  --body <JSON> / --body-file <文件>  原始请求体，文件优先；不补写或覆盖请求字段
+  原始请求体需含 loginAccount 工号（兼容 userName）；显式 username/caller_id 必须与其一致。
   --method password    显式选择密码登录，可配合上述环境变量用于脚本
   --auth-server <url>  覆盖密码登录服务，可用 COREINSIGHT_AUTH_SERVER；不影响 devUC
-  请求体为 userName/passwd；校验成功状态及 Cookie 后保存，会话不存储密码。
+  普通账密请求体含 loginAccount/uid/password/appId/lang/cid/encryptedPasswordSwitch。
+  loginAccount 和 uid 均取登录工号；appId=com.huawei.so.iam.iam_heds，lang=zh_CN，
+  cid 为空，encryptedPasswordSwitch=off。HTTP 2xx、业务 code=0 且有有效 Cookie 才保存。
+  会话不存储密码或原始请求体。
   HTTP 超时放在命令前，例如: coreinsight-cli --timeout 30 auth login --username <工号>
 
 注: --no-browser 仅关闭自动打开，仍需完成本次授权。已有浏览器 SSO

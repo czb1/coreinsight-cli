@@ -14,7 +14,7 @@ Windows 使用 `go build -o coreinsight-cli.exe ./cmd/coreinsight-cli`。更新�
 
 ## 1. 登录
 
-CLI **默认尝试打开浏览器**完成 devUC 授权，用 `--caller_id` 输入一次当前 SSO 账号的工号。也支持显式选择账号密码直接登录：传入 `--username`（或 `-u`）、`--password`（或 `-p`）、`--password-stdin` 中任一账密参数，或使用 `--method password`。仅设置账号密码环境变量不会改变默认浏览器方式；`--method browser` 不能与账密参数混用。
+CLI **默认尝试打开浏览器**完成 devUC 授权，用 `--caller_id` 输入一次当前 SSO 账号的工号。也支持显式选择账号密码直接登录：传入 `--username`（或 `-u`）、`--password`（或 `-p`）、`--password-stdin`、`--body`、`--body-file` 中任一账密参数，或使用 `--method password`。仅设置账号密码环境变量不会改变默认浏览器方式；`--method browser` 不能与账密参数混用。
 
 浏览器登录每次创建新的授权事务，业务请求使用保存的 token，通过 `X-Auth-Token` 头鉴权；账号密码登录保存 Cookie，业务请求使用 `Cookie` 头。切换登录方式成功后替换旧凭证，失败时保留原会话。
 
@@ -59,15 +59,34 @@ coreinsight-cli auth login --username "<工号>" --password "<密码>"
 # 脚本：从标准输入读取密码，例如由凭证管理器通过管道提供
 coreinsight-cli auth login --username "<工号>" --password-stdin
 
-# 已设置 COREINSIGHT_AUTH_USERNAME / COREINSIGHT_AUTH_PASSWORD 时，显式选用密码方式
+# 显式选择密码方式：先读凭证环境变量，缺少时在本机终端输入工号和密码
 coreinsight-cli auth login --method password
+
+# 兼容原始登录 JSON 文件（含 loginAccount、uid、password 等接口字段）
+coreinsight-cli auth login --body-file ./login.json
 ```
 
-密码登录恢复既有接口：`POST https://omtool.rnd.huawei.com/api/auth/login`，JSON 请求体为 `{"userName":"<工号>","passwd":"<密码>"}`。可用 `--auth-server` / `COREINSIGHT_AUTH_SERVER` 覆盖基址，`--server` 也保留对该基址的覆盖兼容；`--market-server` 只影响浏览器授权。HTTP 超时使用命令前的 `--timeout`，例如 `coreinsight-cli --timeout 30 auth login --username "<工号>"`；密码方式不能混用 `--no-browser` 或登录后的轮询 `--timeout`。
+账号密码登录使用原有华为 IDaaS 接口：`POST https://login.huawei.com/login1/rest/hwidcenter/login`。默认基址为 `https://login.huawei.com/login1`，CLI 追加 `/rest/hwidcenter/login`。普通账密登录按原接口构造以下 JSON：
 
-用户名优先取 `--username/-u`，未传时取 `COREINSIGHT_AUTH_USERNAME`。密码优先取显式 `--password/-p` 或 `--password-stdin`（二者互斥），未传时取 `COREINSIGHT_AUTH_PASSWORD`，最后尝试终端无回显输入；无法关闭回显时返回错误。不会保存密码，登录调试日志和错误不输出密码或响应原文。密码请求不跟随重定向；必须收到成功 HTTP 状态、明确的 JSON 业务成功标记和有效 Cookie 才保存。Cookie 的有效期取服务端声明，不把未提供有效期解释为永久有效。
+```json
+{
+  "loginAccount": "<工号>",
+  "uid": "<工号>",
+  "password": "<密码>",
+  "appId": "com.huawei.so.iam.iam_heds",
+  "lang": "zh_CN",
+  "cid": "",
+  "encryptedPasswordSwitch": "off"
+}
+```
 
-密码登录将 `--username` 工号自动绑定为 `caller_id`；不必另传 `--caller_id`，若传入则必须与用户名一致。后续仍自动携带调用者工号，`--user_id` 只用于检索过滤。旧的原始请求体 `--body` / `--body-file` 和 `OMRES_AUTH_*` 环境变量不属于恢复的登录入口。
+可用 `--auth-server` / `COREINSIGHT_AUTH_SERVER` 覆盖基址（包含 `/login1`，不包含后续接口路径），`--server` 也保留对该基址的覆盖兼容；`--market-server` 只影响浏览器授权。HTTP 超时使用命令前的 `--timeout`，例如 `coreinsight-cli --timeout 30 auth login --username "<工号>"`；密码方式不能混用 `--no-browser` 或登录后的轮询 `--timeout`。
+
+凭证优先级沿用原用法：`--body-file` 优先于 `--body`，原始 JSON 原样提交，不补写或覆盖其中的应用字段；未传原始请求体时，用户名取 `--username/-u` → `COREINSIGHT_AUTH_USERNAME` → `OMRES_AUTH_USERNAME` → 终端输入，密码取 `--password/-p` 或 `--password-stdin`（二者互斥）→ `COREINSIGHT_AUTH_PASSWORD` → `OMRES_AUTH_PASSWORD` → 终端无回显输入。用户名和密码环境变量均只在已选择密码方式后读取，不改变默认浏览器方式；无法关闭密码回显时返回错误。
+
+不会保存密码或原始请求体，登录调试日志和错误不输出密码或响应原文。密码请求不跟随重定向；必须收到 HTTP 2xx、JSON 业务 `code=0`（兼容字符串 `"0"`）和有效 Cookie 才保存。Cookie 的有效期取服务端声明，不把未提供有效期解释为永久有效。
+
+密码登录将工号自动绑定为 `caller_id`；不必另传 `--caller_id`，若传入则必须与登录工号一致。原始 JSON 从 `loginAccount`（兼容 `userName`）取工号，显式 `--username` 也必须与其一致。后续仍自动携带调用者工号，`--user_id` 只用于检索过滤。
 
 认证输出说明：
 
@@ -227,8 +246,9 @@ coreinsight-cli experience upload \
 
 - `COREINSIGHT_SERVER`
 - `COREINSIGHT_CHAT_SERVER`
-- `COREINSIGHT_AUTH_SERVER`（账号密码登录基址，默认 `https://omtool.rnd.huawei.com`）
+- `COREINSIGHT_AUTH_SERVER`（账号密码登录基址，默认 `https://login.huawei.com/login1`）
 - `COREINSIGHT_AUTH_USERNAME` / `COREINSIGHT_AUTH_PASSWORD`（仅在显式选择密码登录后读取）
+- `OMRES_AUTH_USERNAME` / `OMRES_AUTH_PASSWORD`（兼容旧用法，优先级低于对应 `COREINSIGHT_AUTH_*` 凭证变量）
 - `COREINSIGHT_MARKET_SERVER`（devUC 浏览器授权登录的市场服务地址，默认 `https://agent.huawei.com`）
 - `COREINSIGHT_AI_COMMUNITY_SERVER`
 - `COREINSIGHT_CORE_HARNESS_SERVER`

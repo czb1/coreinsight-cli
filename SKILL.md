@@ -37,13 +37,17 @@ coreinsight-cli auth login --caller_id "<当前 SSO 账号工号>" --no-browser 
 coreinsight-cli auth login --username "<工号>"
 # 脚本通过安全管道传入密码，不在对话或命令示例中填真实密码
 coreinsight-cli auth login --username "<工号>" --password-stdin
-# 已安全配置 COREINSIGHT_AUTH_USERNAME / COREINSIGHT_AUTH_PASSWORD 时
+# 显式选择密码方式；已有凭证环境变量优先，否则由用户在本机终端输入
 coreinsight-cli auth login --method password
+# 用户已有原始 IDaaS 登录 JSON 文件时
+coreinsight-cli auth login --body-file <用户提供的登录JSON文件>
 ```
 
-显式 `--username/-u`、`--password/-p` 或 `--password-stdin` 也会选择密码方式；仅设置环境变量不会改变默认浏览器方式。CLI 支持 `--password` 直接传参，但优先使用无回显输入、标准输入或已有凭证环境；不让用户把密码发到对话中，不读取或展示会话文件。无法交互输入且没有安全凭证来源时，让用户在自己的终端完成密码登录。
+显式 `--username/-u`、`--password/-p`、`--password-stdin`、`--body` 或 `--body-file` 也会选择密码方式；仅设置环境变量不会改变默认浏览器方式。CLI 支持 `--password` 直接传参，但优先使用无回显输入、标准输入或已有凭证环境；不让用户把密码发到对话中，不读取或展示会话文件、密码或原始登录 JSON 内容。无法交互输入且没有安全凭证来源时，让用户在自己的终端完成密码登录。
 
-密码接口为 `POST <auth-server>/api/auth/login`，默认基址 `https://omtool.rnd.huawei.com`，可用 `--auth-server` 或 `COREINSIGHT_AUTH_SERVER` 覆盖；不要把 devUC 授权页地址当作密码 API。密码方式不使用 `--no-browser` 或登录后的 `--timeout`；HTTP 超时放在命令前。`--password` 与 `--password-stdin` 互斥，`--method browser` 与账密参数互斥。旧 `--body` / `--body-file` 及 `OMRES_AUTH_*` 不作为密码入口。
+按华为 IDaaS 密码接口执行：`POST https://login.huawei.com/login1/rest/hwidcenter/login`。默认基址 `https://login.huawei.com/login1`，可用 `--auth-server` 或 `COREINSIGHT_AUTH_SERVER` 覆盖，CLI 追加 `/rest/hwidcenter/login`；不要把 devUC 授权页地址当作密码 API。普通账密请求中 `loginAccount`、`uid` 均取工号，`password` 取密码；`appId=com.huawei.so.iam.iam_heds`、`lang=zh_CN`、`cid` 为空、`encryptedPasswordSwitch=off`，由 CLI 构造。
+
+兼容原用法：`--body-file` 优先于 `--body`，原始 JSON 原样提交，从 `loginAccount`（兼容 `userName`）绑定工号；显式 `--username` / `--caller_id` 必须与其一致。没有原始 JSON 时，凭证优先取命令行，再取 `COREINSIGHT_AUTH_USERNAME/PASSWORD`，再取 `OMRES_AUTH_USERNAME/PASSWORD`，最后交互输入。密码方式不使用 `--no-browser` 或登录后的 `--timeout`；HTTP 超时放在命令前。`--password` 与 `--password-stdin` 互斥，`--method browser` 与账密参数互斥。密码接口须返回 HTTP 2xx、业务 `code=0` 和有效 Cookie 才保存会话。
 
 仅在用户要求退出时执行 `auth logout`，并说明它只删除本地凭证，不撤销服务端授权或浏览器 SSO。
 

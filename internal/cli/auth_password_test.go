@@ -3,10 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +67,8 @@ func TestPasswordLoginAndBusinessRequest(t *testing.T) {
 			isolatedHome(t)
 			t.Setenv("COREINSIGHT_AUTH_USERNAME", "employee001")
 			t.Setenv("COREINSIGHT_AUTH_PASSWORD", "environment-secret")
+			t.Setenv("OMRES_AUTH_USERNAME", "lower-priority-user")
+			t.Setenv("OMRES_AUTH_PASSWORD", "lower-priority-secret")
 			passwordTestStdin(t, tc.input)
 			oldBrowser := openBrowserFn
 			openBrowserFn = func(string) error { t.Error("password login opened browser"); return nil }
@@ -77,10 +81,17 @@ func TestPasswordLoginAndBusinessRequest(t *testing.T) {
 				calls <- r.URL.Path
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
-				case passwordLoginPath:
+				case "/login1/rest/hwidcenter/login":
 					var body map[string]string
-					if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil || body["userName"] != "employee001" || body["passwd"] != tc.password {
-						t.Error("password login request does not match the original API contract")
+					want := map[string]string{
+						"loginAccount": "employee001", "uid": "employee001", "password": tc.password,
+						"appId": "com.huawei.so.iam.iam_heds", "lang": "zh_CN", "cid": "", "encryptedPasswordSwitch": "off",
+					}
+					if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil || !reflect.DeepEqual(body, want) {
+						t.Error("password login request does not match the IDaaS API contract")
+					}
+					if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Accept") != "application/json" {
+						t.Error("password login must send and accept JSON")
 					}
 					if r.Header.Get("Cookie") != "" || r.Header.Get("X-Auth-Token") != "" {
 						t.Error("login forwarded old credentials")
@@ -104,7 +115,7 @@ func TestPasswordLoginAndBusinessRequest(t *testing.T) {
 			var output string
 			logs := capturePasswordStderr(t, func() {
 				output = captureAuthStdout(t, func() {
-					args := append([]string{"--auth-server", srv.URL, "--debug", "auth", "login"}, tc.args...)
+					args := append([]string{"--auth-server", srv.URL + "/login1/", "--debug", "auth", "login"}, tc.args...)
 					if Run(args) != 0 {
 						t.Error("password login failed")
 					}
@@ -121,7 +132,7 @@ func TestPasswordLoginAndBusinessRequest(t *testing.T) {
 				t.Error("cookie lifetime was not preserved")
 			}
 			raw, _ := os.ReadFile(sessionFile())
-			if strings.Contains(string(raw), tc.password) || strings.Contains(string(raw), "passwd") {
+			if strings.Contains(string(raw), tc.password) || strings.Contains(string(raw), `"password"`) {
 				t.Fatal("password persisted in session file")
 			}
 			captureAuthStdout(t, func() {
@@ -140,6 +151,8 @@ func TestPasswordEnvironmentDoesNotChangeDefaultBrowser(t *testing.T) {
 	isolatedHome(t)
 	t.Setenv("COREINSIGHT_AUTH_USERNAME", "password-user")
 	t.Setenv("COREINSIGHT_AUTH_PASSWORD", "do-not-use")
+	t.Setenv("OMRES_AUTH_USERNAME", "legacy-user")
+	t.Setenv("OMRES_AUTH_PASSWORD", "do-not-use-either")
 	if err := saveSession(&Session{Cookie: "sid=old-cookie", CallerID: "password-user"}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +189,8 @@ func TestPasswordLoginRejectsAmbiguousOrMissingInputs(t *testing.T) {
 	isolatedHome(t)
 	t.Setenv("COREINSIGHT_AUTH_USERNAME", "")
 	t.Setenv("COREINSIGHT_AUTH_PASSWORD", "")
+	t.Setenv("OMRES_AUTH_USERNAME", "")
+	t.Setenv("OMRES_AUTH_PASSWORD", "")
 	passwordTestStdin(t, "")
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("invalid arguments made a network request") }))
 	defer srv.Close()
@@ -190,6 +205,14 @@ func TestPasswordLoginRejectsAmbiguousOrMissingInputs(t *testing.T) {
 		{"--username", "employee001", "--password", "secret", "--no-browser"},
 		{"--username", "employee001", "--password", "secret", "--timeout", "30"},
 		{"--method", "browser", "--username", "employee001"},
+		{"--method", "browser", "--body", `{"loginAccount":"employee001"}`},
+		{"--body", ""}, {"--body", "secret"}, {"--body", `null`}, {"--body", `[]`},
+		{"--body", `{"password":"secret"}`},
+		{"--body", `{"loginAccount":123,"password":"secret"}`},
+		{"--body", `{"loginAccount":"employee001","userName":"other-user"}`},
+		{"--body", `{"loginAccount":"employee001"}`, "--username", "other-user"},
+		{"--body", `{"loginAccount":"employee001"}`, "--caller_id", "other-user"},
+		{"--body-file", filepath.Join(t.TempDir(), "missing.json")},
 	} {
 		if err := runAuthLogin(rt, args); err == nil || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("invalid arguments accepted or leaked a password: %v", err)
@@ -209,6 +232,9 @@ func TestPasswordFailurePreservesSessionAndRedactsResponse(t *testing.T) {
 		{"business error", `{"code":401,"msg":"private-response"}`, "application/json", "sid=new", 200},
 		{"conflicting success", `{"code":0,"success":false}`, "application/json", "sid=new", 200},
 		{"missing success", `{}`, "application/json", "sid=new", 200},
+		{"devuc success code", `{"code":200}`, "application/json", "sid=new", 200},
+		{"devuc string code", `{"code":"200"}`, "application/json", "sid=new", 200},
+		{"boolean success only", `{"success":true}`, "application/json", "sid=new", 200},
 		{"invalid success code", `{"code":null}`, "application/json", "sid=new", 200},
 		{"invalid code type", `{"code":{}}`, "application/json", "sid=new", 200},
 		{"null", `null`, "application/json", "sid=new", 200},
@@ -280,8 +306,8 @@ func TestPasswordDefaultServerAndOverrides(t *testing.T) {
 	isolatedHome(t)
 	t.Setenv("COREINSIGHT_AUTH_SERVER", "")
 	rt, err := defaultRuntime()
-	if err != nil || rt.AuthServer != "https://omtool.rnd.huawei.com" {
-		t.Fatal("original password login server was not restored")
+	if err != nil || rt.AuthServer != "https://login.huawei.com/login1" {
+		t.Fatal("IDaaS password login server was not restored")
 	}
 	t.Setenv("COREINSIGHT_AUTH_SERVER", "https://auth.example.test/")
 	rt, err = defaultRuntime()
@@ -293,5 +319,96 @@ func TestPasswordDefaultServerAndOverrides(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(sessionFile()), "session.json")); !os.IsNotExist(err) {
 		t.Fatal("runtime initialization unexpectedly created a session")
+	}
+}
+
+func TestPasswordLegacyEnvironment(t *testing.T) {
+	isolatedHome(t)
+	t.Setenv("COREINSIGHT_AUTH_USERNAME", "")
+	t.Setenv("COREINSIGHT_AUTH_PASSWORD", "")
+	t.Setenv("OMRES_AUTH_USERNAME", "legacy001")
+	t.Setenv("OMRES_AUTH_PASSWORD", "legacy-secret")
+	passwordTestStdin(t, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if r.URL.Path != "/login1/rest/hwidcenter/login" || json.NewDecoder(r.Body).Decode(&body) != nil || body["loginAccount"] != "legacy001" || body["uid"] != "legacy001" || body["password"] != "legacy-secret" {
+			t.Error("legacy credential environment did not reach IDaaS")
+		}
+		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "legacy-cookie"})
+		fmt.Fprint(w, `{"code":"0"}`)
+	}))
+	defer srv.Close()
+	captureAuthStdout(t, func() {
+		if Run([]string{"--auth-server", srv.URL + "/login1", "auth", "login", "--method", "password"}) != 0 {
+			t.Error("legacy credential login failed")
+		}
+	})
+	sess, err := loadSession()
+	if err != nil || sess == nil || sess.CallerID != "legacy001" || sess.Cookie != "sid=legacy-cookie" {
+		t.Fatal("legacy login did not bind the login identity and cookie")
+	}
+}
+
+func TestPasswordRawBodyCompatibility(t *testing.T) {
+	const raw = `{"loginAccount":"raw001","uid":"raw001","password":"raw-secret","appId":"custom-app","lang":"en_US","cid":"custom-cid","encryptedPasswordSwitch":"on","extra":true}`
+	for _, mode := range []string{"body", "body-file", "file precedence"} {
+		t.Run(mode, func(t *testing.T) {
+			isolatedHome(t)
+			t.Setenv("COREINSIGHT_AUTH_USERNAME", "ignored-env-user")
+			t.Setenv("COREINSIGHT_AUTH_PASSWORD", "ignored-env-secret")
+			passwordTestStdin(t, "")
+			oldBrowser := openBrowserFn
+			openBrowserFn = func(string) error { t.Error("raw password login opened browser"); return nil }
+			t.Cleanup(func() { openBrowserFn = oldBrowser })
+			args := []string{"--body", raw}
+			if mode != "body" {
+				path := filepath.Join(t.TempDir(), "credentials.json")
+				if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args = []string{"--body-file", path}
+				if mode == "file precedence" {
+					args = append(args, "--body", `not-json`, "--username", "raw001", "--caller_id", "raw001")
+				}
+			}
+			requests := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests <- struct{}{}
+				body, err := io.ReadAll(r.Body)
+				if err != nil || r.Method != http.MethodPost || r.URL.Path != "/login1/rest/hwidcenter/login" || string(body) != raw {
+					t.Error("raw login body was not sent unchanged to IDaaS")
+				}
+				http.SetCookie(w, &http.Cookie{Name: "sid", Value: "raw-cookie"})
+				fmt.Fprint(w, `{"code":0}`)
+			}))
+			defer srv.Close()
+			var output string
+			logs := capturePasswordStderr(t, func() {
+				output = captureAuthStdout(t, func() {
+					if Run(append([]string{"--auth-server", srv.URL + "/login1/", "--debug", "auth", "login"}, args...)) != 0 {
+						t.Error("raw password login failed")
+					}
+				})
+			})
+			sess, err := loadSession()
+			if err != nil || sess == nil || sess.CallerID != "raw001" || sess.Username != "raw001" || len(requests) != 1 {
+				t.Fatal("raw body login did not use the body identity")
+			}
+			saved, _ := os.ReadFile(sessionFile())
+			if strings.Contains(output+logs+string(saved), "raw-secret") || strings.Contains(string(saved), "custom-app") {
+				t.Fatal("raw request credentials were printed or persisted")
+			}
+		})
+	}
+}
+
+func TestPasswordRawArgumentValuesRemainLiteral(t *testing.T) {
+	for _, flag := range []string{"--body", "-body", "--body-file", "-body-file"} {
+		rt := &Runtime{}
+		want := []string{"auth", "login", flag, "--debug"}
+		got, err := parseGlobals(rt, want)
+		if err != nil || !reflect.DeepEqual(got, want) || rt.Debug {
+			t.Fatal("raw login argument was interpreted as a global flag")
+		}
 	}
 }

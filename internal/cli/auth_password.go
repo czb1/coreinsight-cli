@@ -11,30 +11,19 @@ import (
 	"time"
 )
 
-// Restore the original password API contract, independently of devUC.
-const passwordLoginPath = "/api/auth/login"
+// IDaaS password login uses its own endpoint and payload, independently of devUC.
+const passwordLoginPath = "/rest/hwidcenter/login"
 
 func runPasswordLogin(rt *Runtime, o *loginOpts, set map[string]bool) error {
-	username := strings.TrimSpace(o.username)
-	if !set["username"] && !set["u"] {
-		username = strings.TrimSpace(os.Getenv("COREINSIGHT_AUTH_USERNAME"))
-	}
-	if username == "" {
-		return fmt.Errorf("密码登录缺少工号：请使用 --username 或 COREINSIGHT_AUTH_USERNAME")
-	}
-	if set["caller_id"] && strings.TrimSpace(o.callerID) != username {
-		return fmt.Errorf("密码登录的 --caller_id 必须与 --username 工号一致；通常可省略，自动绑定登录账号")
-	}
-	password, err := resolveLoginPassword(o, set)
+	body, username, err := buildPasswordLoginBody(o, set)
 	if err != nil {
 		return err
+	}
+	if set["caller_id"] && strings.TrimSpace(o.callerID) != username {
+		return fmt.Errorf("密码登录的 --caller_id 必须与登录工号一致；通常可省略，自动绑定登录账号")
 	}
 	if !validAuthorizeURL(rt.AuthServer) {
 		return fmt.Errorf("账号密码登录地址无效，请检查 --auth-server 或 COREINSIGHT_AUTH_SERVER")
-	}
-	body, err := json.Marshal(map[string]string{"userName": username, "passwd": password})
-	if err != nil {
-		return err
 	}
 	cookie, expires, err := requestPasswordLogin(rt, body)
 	if err != nil {
@@ -66,6 +55,80 @@ func runPasswordLogin(rt *Runtime, o *loginOpts, set map[string]bool) error {
 	return nil
 }
 
+func buildPasswordLoginBody(o *loginOpts, set map[string]bool) ([]byte, string, error) {
+	// Preserve the original --body-file > --body > credential-fields order.
+	// Raw JSON is sent unchanged, so callers can supply their IDaaS app fields.
+	if set["body-file"] || set["body"] {
+		const maxBodyBytes = 64 << 10
+		raw := []byte(o.body)
+		if set["body-file"] {
+			f, err := os.Open(o.bodyFile)
+			if err != nil {
+				return nil, "", fmt.Errorf("无法读取登录 --body-file")
+			}
+			defer f.Close()
+			raw, err = io.ReadAll(io.LimitReader(f, maxBodyBytes+1))
+			if err != nil {
+				return nil, "", fmt.Errorf("无法读取登录 --body-file")
+			}
+		}
+		if len(raw) > maxBodyBytes {
+			return nil, "", fmt.Errorf("登录 JSON 请求体过大")
+		}
+		var payload map[string]interface{}
+		if json.Unmarshal(raw, &payload) != nil || payload == nil {
+			return nil, "", fmt.Errorf("登录请求体必须是合法 JSON 对象")
+		}
+		username, _ := payload["loginAccount"].(string)
+		legacyName, _ := payload["userName"].(string)
+		if username == "" {
+			username = legacyName
+		} else if legacyName != "" && legacyName != username {
+			return nil, "", fmt.Errorf("登录请求体中的账号字段不一致")
+		}
+		username = strings.TrimSpace(username)
+		if username == "" {
+			return nil, "", fmt.Errorf("登录请求体缺少 loginAccount 工号")
+		}
+		if (set["username"] || set["u"]) && strings.TrimSpace(o.username) != username {
+			return nil, "", fmt.Errorf("--username 必须与登录请求体的工号一致")
+		}
+		return raw, username, nil
+	}
+
+	username := strings.TrimSpace(o.username)
+	if !set["username"] && !set["u"] {
+		username = strings.TrimSpace(os.Getenv("COREINSIGHT_AUTH_USERNAME"))
+		if username == "" {
+			username = strings.TrimSpace(os.Getenv("OMRES_AUTH_USERNAME"))
+		}
+		if username == "" && stdinIsTerminal() {
+			var err error
+			username, err = promptUsername()
+			if err != nil {
+				return nil, "", err
+			}
+		}
+	}
+	if username == "" {
+		return nil, "", fmt.Errorf("密码登录缺少工号：请使用 --username、COREINSIGHT_AUTH_USERNAME 或 OMRES_AUTH_USERNAME")
+	}
+	password, err := resolveLoginPassword(o, set)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := json.Marshal(map[string]string{
+		"loginAccount":            username,
+		"uid":                     username,
+		"password":                password,
+		"lang":                    "zh_CN",
+		"cid":                     "",
+		"appId":                   "com.huawei.so.iam.iam_heds",
+		"encryptedPasswordSwitch": "off",
+	})
+	return body, username, err
+}
+
 func resolveLoginPassword(o *loginOpts, set map[string]bool) (string, error) {
 	explicit := set["password"] || set["p"]
 	if o.passwordStdin && explicit {
@@ -85,8 +148,11 @@ func resolveLoginPassword(o *loginOpts, set map[string]bool) (string, error) {
 	default:
 		password = os.Getenv("COREINSIGHT_AUTH_PASSWORD")
 		if password == "" {
+			password = os.Getenv("OMRES_AUTH_PASSWORD")
+		}
+		if password == "" {
 			if !stdinIsTerminal() {
-				return "", fmt.Errorf("缺少密码：请使用 --password-stdin、COREINSIGHT_AUTH_PASSWORD，或在终端执行 auth login --username <工号> 无回显输入")
+				return "", fmt.Errorf("缺少密码：请使用 --password-stdin、COREINSIGHT_AUTH_PASSWORD / OMRES_AUTH_PASSWORD，或在终端执行 auth login --username <工号> 无回显输入")
 			}
 			var err error
 			password, err = promptPassword()
@@ -130,6 +196,12 @@ func requestPasswordLogin(rt *Runtime, body []byte) (string, time.Time, error) {
 	}
 	if err := checkAuthSuccess(payload); err != nil {
 		return "", time.Time{}, err
+	}
+	// IDaaS reports success with code=0; devUC's code=200 is a different contract.
+	switch payload["code"] {
+	case float64(0), "0":
+	default:
+		return "", time.Time{}, fmt.Errorf("账号密码登录接口未返回成功业务码 0")
 	}
 	cookie, expires := extractCookieWithExpiry(resp)
 	if cookie == "" {
