@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const defaultAuthServer = "https://omtool.rnd.huawei.com"
+const defaultAuthServer = "https://login.huawei.com/login1"
 
 // defaultMarketServer 是 agentcenter devUC 浏览器授权登录所在的市场域，
 // 授权页 URL 申请和 token 轮询都挂在这个 baseURL 下。
